@@ -5,6 +5,7 @@ from glob import glob
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 from matplotlib.backend_bases import MouseButton
+from matplotlib.text import Annotation
 
 
 FILTER_FREQS = (0, 80)  # low, high
@@ -602,13 +603,30 @@ class Visualizer:
 
     def open_figure(self, color="white"):
         self.fig, self.ax = plt.subplots()
+        self.fig.canvas.manager.set_window_title(f'EEG Viewer - Subject {self.sub} (press H for help)')
+
         self.plot_pos(0)
         axis_position = plt.axes([0.2, -0.1, 0.65, 0.03], facecolor=color)
         self.slider = Slider(axis_position, "Pos", 0, self.epochs_pre.shape[0], valstep=1)
         self.fig.canvas.mpl_connect("key_press_event", self.keypress_event)
         self.fig.canvas.mpl_connect("button_press_event", self.click_toggle)
 
+        # make a new axis for the help window
+
+        self.help_ax = plt.axes()
+
+        self.help_ax.set_title('Keyboard Shortcuts',size=40)
+        self.help_ax.text(0.5,1,"\n h: Hide and show this window \n" +
+                "[ and ]: Change window size \n" +
+                "+ and -: Change channel scale \n"+
+                "r: Show rejection reasons \n"+
+                "w: Save annotations \n",
+                horizontalalignment='center',verticalalignment='top',transform=self.help_ax.transAxes,size=20)
+        self.help_ax.set_axis_off()
+        self.help_ax.set_visible(False)
+
     def plot_pos(self, pos):
+        self.rej_reasons_on = False
 
         self.ax.plot(np.concatenate(self.epochs_pre[pos: pos + self.win_step], 1).T, color="#444444", linewidth=.75)
 
@@ -663,6 +681,30 @@ class Visualizer:
                 self.ax.fill_between([i * self.epoch_len, (i + 1) * self.epoch_len + 1], [self.ylim[0]], [self.ylim[1]], color="#edb74a", alpha=0.4, zorder=-10)
         # TODO: gray out ignored channels
 
+    def rejection_reasons(self,force_show=False):
+        '''
+        function to show and hide rejection reasons
+        '''
+
+        # print(force_show)
+
+        if not self.rej_reasons_on:
+
+            for i in range(self.win_step):
+                trial = self.slider.val + i
+
+                for ch in np.where(self.rej_chans[trial])[0]:
+                    self.ax.annotate(f'{self.chan_labels[ch]}: {self.rej_reasons[trial,ch]} (R)',(i * self.epoch_len,self.ys[ch]),backgroundcolor='white',annotation_clip=False)
+            self.rej_reasons_on = True
+
+        else:
+
+            for child in self.ax.get_children():
+                if isinstance(child,Annotation) and '(R)' in child.get_text():
+                    child.remove()
+            self.rej_reasons_on = False
+        self.fig.canvas.draw_idle()        
+
     def update(self, force=False):
         pos = self.slider.val
         if pos < 0:
@@ -715,8 +757,15 @@ class Visualizer:
                 self.update(force=True)
             case "w":
                 self.save_annotations()
+
+            case "r":
+                self.rejection_reasons()
+            case "h":
+                self.help_ax.set_visible(not self.help_ax.get_visible())
+                self.ax.set_visible(not self.ax.get_visible())
+                self.fig.canvas.draw_idle()
             case _:
-                print(f"key not recognized: {ev.key}")
+                print(f"key not recognized: {ev.key}. Press h for help.")
 
     def click_toggle(self, ev):
 
