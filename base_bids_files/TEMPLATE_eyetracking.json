@@ -1,0 +1,23 @@
+{
+    "TaskName":"TASKNAME",
+    "TaskDescription":"TASKDESCRIPTION",
+    "InstitutionName":"The University of Chicago",
+    "Manufacturer":"SR-Research",
+    "ManufacturersModelName":"Eyelink 1000 Plus",
+    "SamplingFrequency":1000,
+    "SampleCoordinateUnits":"pixel",
+    "SampleCoordinateSystem":"gaze-on-screen",
+    "EnvironmentCoordinates":[["0,0","top left"],["1920,1080","bottom right"]],
+    "EventIdentifier": "SYNC",
+    "RawSamples":1,
+    "IncludedEyeMovementEvents": "n/a",
+    "DetectionAlgorithm": "None",
+    "StartMessage":"SYNC 1",
+    "EndMessage": "SYNC 4",
+    "CalibrationType":"HV9",
+    "RecordedEye": "Both",
+    "ScreenSize":"532 x 300 mm",
+    "ScreenResolution":"1920 x 1080 px",
+    "ScreenRefreshRate":120
+  }
+

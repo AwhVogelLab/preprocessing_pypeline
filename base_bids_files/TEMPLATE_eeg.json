@@ -1,0 +1,24 @@
+{
+    "InstitutionName":"The University of Chicago",
+    "SamplingFrequency":1000,
+    "Manufacturer":"Brain Products",
+    "ManufacturersModelName":"actiCHamp",
+    "CapManufacturer":"EasyCap",
+    "EEGChannelCount":31,
+    "EOGChannelCount":2,
+    "ECGChannelCount":0,
+    "EMGChannelCount":0,
+    "MiscChannelCount":1,
+    "TriggerChannelCount":0,
+    "PowerLineFrequency":60,
+    "EEGPlacementScheme":"10-20 system (modified layout)",
+    "EEGReference":"Algebraic average of mastoids",
+    "EEGGround":"placed on AFz",
+    "HardwareFSilters":{
+      "ADC's decimation filter (hardware bandwidth limit)":{
+        "-3dB cutoff point (Hz)":480,
+        "Filter order sinc response":5
+      }
+    },
+    "RecordingType":"continuous"
+  }
