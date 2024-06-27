@@ -266,7 +266,7 @@ class Preprocess:
         with open(output_file, "w") as f:
             f.writelines(newlines)
 
-            
+
     def check_both_eyes(self, chan_labels, rej_chans):
         """
         If an artifact is found in eyetracking channels, ensures that it is found in both eyes
@@ -563,7 +563,7 @@ class Preprocess:
         new_sidecar = path.update(suffix='eeg',extension='.json')
         with open(sidecar) as f:
             sidecar_data = json.load(f)
-        new_keys = {'RecordingType':'epoched','EpochLength':round(TRIAL_END_TIME - TRIAL_START_TIME,3)}
+        new_keys = {'RecordingType':'epoched','EpochLength':round(self.trial_end_t - self.trial_start_t,3)}
         sidecar_data.update(new_keys)
         with open(new_sidecar.fpath,'w') as f:
             json.dump(sidecar_data,f,indent=4)
@@ -594,6 +594,7 @@ class Visualizer:
         trial_start: float,
         trial_end: float,
         condition_dict: dict,
+        experiment_name: str,
         rejection_time=(None, None),
         win_step: int = SLIDER_STEP,
         downscale={"eyegaze": EYETRACK_SCALE},
@@ -604,6 +605,7 @@ class Visualizer:
         self.sub = sub
         self.parent_dir = parent_dir
         self.condition_dict = condition_dict
+        self.experiment_name = experiment_name
         self.srate = srate
         self.timelock = timelock / srate
         self.trial_start = trial_start
@@ -616,7 +618,21 @@ class Visualizer:
         self.downscale = downscale
         self.chan_offset = chan_offset
 
-        self.epochs_obj = mne.read_epochs(os.path.join(parent_dir, sub, f"{sub}_epo.fif"))
+        self.data_path = mne_bids.path.BIDSPath(subject=sub, task=self.experiment_name,description='preprocessed',root=os.path.join(self.parent_dir,'derivatives'), datatype="eeg",check=False)
+
+        self.data_path.update(suffix='eeg',extension='.fif')
+        self.epochs_obj = mne.read_epochs(self.data_path.fpath)
+
+        self.data_path.update(suffix='events',extension='.tsv')
+
+        self.conditions = pd.read_csv(self.data_path.fpath,sep='\t')['trial_type']
+        
+        self.data_path.update(suffix='artifacts',extension='.tsv')
+        rej = pd.read_csv(self.data_path.fpath,sep='\t')
+        self.rej_chans = rej.apply(np.vectorize(lambda x: len(x) > 0)).to_numpy()
+        self.rej_reasons = rej.to_numpy()
+
+
         self.conditions = np.load(os.path.join(parent_dir, sub, f"{sub}_conditions.npy"))
         self.rej_chans = np.load(os.path.join(parent_dir, sub, f"{sub}_rej.npy"))
         self.rej_reasons = np.load(os.path.join(parent_dir, sub, f"{sub}_rej_reasons.npy"), allow_pickle=True)
@@ -872,5 +888,6 @@ class Visualizer:
             self.update(force=True)
 
     def save_annotations(self):
-        print(f'{np.sum(self.rej_manual)}/{len(self.rej_manual)} trials rejected. Saving annotations as ".../{self.sub}_rej_FINAL.npy"')
-        np.save(os.path.join(self.parent_dir, self.sub, f"{self.sub}_rej_FINAL.npy"), self.rej_manual)
+        self.data_path.update(suffix='rejection_flags',extension='.npy')
+        print(f'{np.sum(self.rej_manual)}/{len(self.rej_manual)} trials rejected. Saving annotations as "{self.data_path.fpath}"')
+        np.save(self.data_path.fpath, self.rej_manual)
