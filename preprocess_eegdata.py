@@ -26,6 +26,7 @@ class Preprocess:
     def __init__(
         self,
         data_dir: str,
+        root_dir: str,
         # file_prefix: str,
         trial_start: float,
         trial_end: float,
@@ -46,6 +47,7 @@ class Preprocess:
     ):
 
         self.data_dir = data_dir
+        self.root_dir = root_dir
         # self.file_prefix = file_prefix
         self.trial_start_t = trial_start
         self.trial_end_t = trial_end
@@ -72,7 +74,7 @@ class Preprocess:
         assert data.shape == reref_values.shape
         return data - (0.5 * reref_values)
     
-    def import_eeg(self,root_data_dir,subject_number,overwrite=False):
+    def import_eeg(self,subject_number,overwrite=False):
         '''
         function to import raw eeg data and convert it to a bids object
 
@@ -83,7 +85,7 @@ class Preprocess:
             bids object (saved from raw EEG)
 
         '''
-        subject_dir = os.path.join(root_data_dir,subject_number)
+        subject_dir = os.path.join(self.root_dir,subject_number)
         vhdr_file = sorted(glob("*.vhdr", root_dir=subject_dir))
 
 
@@ -130,10 +132,16 @@ class Preprocess:
         
 
         return eegdata,events
+    
+    def import_behavior(self,subject_number):
+        path = mne_bids.BIDSPath(subject=subject_number,task=self.experiment_name, root=self.data_dir, datatype='behavior', suffix='beh', extension='.tsv')
+        for f in glob.glob(os.path.join(self.root_dir,subject_number,'*.csv')): 
+            if 'beh' in f:
+                pd.read_csv(f).to_csv(path.fpath,sep='\t')
 
         
 
-    def import_eyetracker(self, root_data_dir,subject_number,overwrite=False):
+    def import_eyetracker(self,subject_number,overwrite=False):
         """Loads in eyetracking data for a subject
 
         Args:
@@ -145,11 +153,11 @@ class Preprocess:
             eye: mne raw object containing eyetracking data
             et_events: events structure containing condition codes. These should match the EEG conditions
         """
-        subject_dir = os.path.join(root_data_dir,subject_number)
-        eye_path = os.path.join(self.data_dir, f"sub-{subject_number}", "eyetracking")
-        os.makedirs(eye_path, exist_ok=True)
-        base_fname = os.path.join(eye_path, f"sub-{subject_number}_task-{self.experiment_name}")
-        copied_fname = base_fname + "_eyetrack.asc"
+        
+        subject_dir = os.path.join(self.root_dir,subject_number)
+        path = mne_bids.path.BIDSpath(subject=subject_number,task=self.experiment_name, root=self.data_dir, datatype='eyetracking', suffix='eyetracking', extension='.asc',check=False)
+        path.mkdir()
+
 
         # COPY MAIN ASC FILE (with spaces removed)
 
@@ -162,18 +170,21 @@ class Preprocess:
         asc_file = os.path.join(subject_dir, asc_file[0])
 
         if self.no_et_spaces:
-            shutil.copy2(asc_file,copied_fname)
+            shutil.copy2(asc_file,path.fpath)
         else:
-            self.remove_eyetrack_spaces(asc_file,copied_fname)
-
-        # save sidecar
-        shutil.copy('./base_bids_files/TEMPLATE_eyetracking.json',base_fname+"_eyetrack.json")
-        print('WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF') # option? automatically open this?
+            self.remove_eyetrack_spaces(asc_file,path.fpath)
 
 
         # load in eye tracker data
-        eye = mne.io.read_raw_eyelink(copied_fname, create_annotations=["blinks", "messages"])
+        eye = mne.io.read_raw_eyelink(path.fpath, create_annotations=["blinks", "messages"])
         et_events, et_event_dict = mne.events_from_annotations(eye)
+
+        # save sidecar
+        path.update(extension='.json')
+        shutil.copy('./base_bids_files/TEMPLATE_eyetracking.json',path.fpath)
+        print('WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF') # option? automatically open this?
+
+
 
         # convert events to match the EEG events
 
@@ -190,6 +201,7 @@ class Preprocess:
         
 
         # save events as TSV
+        path.update(suffix='events',extension='.tsv')
 
         eye_events = pd.DataFrame(columns = ['onset','duration','trial_type','value','sample'])
         eye_events['sample'] = et_events_converted[:,0]
@@ -200,10 +212,11 @@ class Preprocess:
         get_events = lambda trl: event_names_inv[trl['value']]
         eye_events['trial_type'] = eye_events.apply(get_events,axis=1)
         eye_events['duration'] = 0
-        eye_events.to_csv(base_fname+"_events.tsv",sep=str('\t'),index=False)
+        eye_events.to_csv(path.fpath,sep=str('\t'),index=False)
 
         # sidecar events
-        shutil.copy('./base_bids_files/TEMPLATE_events.json',base_fname+"_events.json")
+        path.update(extension='.json')
+        shutil.copy('./base_bids_files/TEMPLATE_events.json',path.fpath)
         print('WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF') # option? automatically open this?
         
 
