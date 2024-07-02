@@ -10,6 +10,7 @@ from matplotlib.text import Annotation
 import pandas as pd
 import re
 import json
+from tempfile import NamedTemporaryFile
 import shutil
 
 FILTER_FREQS = (0, 80)  # low, high
@@ -36,6 +37,7 @@ class Preprocess:
         event_code_dict: dict,
         event_acceptable_window: int = 1000,
         filter_freqs=FILTER_FREQS,
+        srate: int = None,
         
         no_et_spaces: bool = True,
 
@@ -45,17 +47,18 @@ class Preprocess:
         drop_channels=None,
         experiment_name=None
     ):
-
+        
         self.data_dir = data_dir
         self.root_dir = root_dir
         # self.file_prefix = file_prefix
+        self.srate = srate
         self.trial_start_t = trial_start
         self.trial_end_t = trial_end
         self.event_dict = event_dict
         self.stim_conditions = stim_conditions
         self.event_code_dict = event_code_dict
         self.event_names = event_names if event_names is not None else event_dict
-        self.event_names.update({'New Segment/':99999})
+        self.event_names.update({'New Segment/':99999, 'New Segment/LostSamples: 2': 10001,})
         self.event_acceptable_window = event_acceptable_window
         self.timelock_ix = timelock_ix
         self.filter_freqs = filter_freqs
@@ -92,6 +95,7 @@ class Preprocess:
         if len(vhdr_file) == 0:
             raise FileNotFoundError("No vhdr files in subject directory")
         elif len(vhdr_file) == 1:
+            concatenated = False
 
             eegfile = os.path.join(subject_dir, vhdr_file[0])  # search for vhdr file
             eegdata = mne.io.read_raw_brainvision(eegfile, eog=["HEOG", "VEOG"], misc=["StimTrak"], preload=False)  # read into mne.raw structure
@@ -100,32 +104,33 @@ class Preprocess:
 
             for file in vhdr_file:
                 print("More than 1 vhdr file present in subject directory. They will be concatenated in alphabetical order")
+                concatenated = True
+                
 
                 eegfile = os.path.join(subject_dir, file)  # search for vhdr file
                 raws.append(mne.io.read_raw_brainvision(eegfile, eog=["HEOG", "VEOG"], misc=["StimTrak"], preload=False))
-                eegdata = mne.concatenate_raws(raws)
+            eegdata = mne.concatenate_raws(raws)
+
+
 
 
         events,event_dict = mne.events_from_annotations(eegdata)
+        boundaries = {k:v for k,v in event_dict.items() if 'New Segment' in k}
+        self.event_names.update(boundaries)
 
         eegdata.set_annotations(None)
 
         
 
         bids_path = mne_bids.BIDSPath(subject=subject_number,task=self.experiment_name, root=self.data_dir, datatype='eeg', suffix='eeg', extension='.vhdr')
-        mne_bids.write_raw_bids(eegdata, bids_path, overwrite=overwrite,events=events,event_id=self.event_names, verbose=False)
-
+        mne_bids.write_raw_bids(eegdata, bids_path, overwrite=overwrite,events=events,event_id=self.event_names, verbose=False,allow_preload=True,format='BrainVision')
 
         # update sidecar with base values
-        sidecar = bids_path.find_matching_sidecar('eeg.json')
-        with open(sidecar,'r+') as f1:
-            sidecar_data = json.load(f1)
-            with open('./base_bids_files/TEMPLATE_eeg.json') as f2:
-                sidecar_base = json.load(f2)
+        bids_path.update(extension='.json')
+        with open('./base_bids_files/TEMPLATE_eeg.json') as f:
+            sidecar_base = json.load(f)
 
-            sidecar_data.update(sidecar_base)
-            json.dump(sidecar_data,f1,indent=4)
-
+        mne_bids.update_sidecar_json(bids_path,sidecar_base)
 
         # events,_ = mne.events_from_annotations(eegdata)
         events = pd.read_csv(bids_path.copy().update(suffix='events',extension='.tsv').fpath,sep='\t')
@@ -134,8 +139,8 @@ class Preprocess:
         return eegdata,events
     
     def import_behavior(self,subject_number):
-        path = mne_bids.BIDSPath(subject=subject_number,task=self.experiment_name, root=self.data_dir, datatype='behavior', suffix='beh', extension='.tsv')
-        for f in glob.glob(os.path.join(self.root_dir,subject_number,'*.csv')): 
+        path = mne_bids.BIDSPath(subject=subject_number,task=self.experiment_name, root=self.data_dir, datatype='beh', suffix='beh', extension='.tsv',check='false')
+        for f in glob(os.path.join(self.root_dir,subject_number,'*.csv')): 
             if 'beh' in f:
                 pd.read_csv(f).to_csv(path.fpath,sep='\t')
 
@@ -155,7 +160,7 @@ class Preprocess:
         """
         
         subject_dir = os.path.join(self.root_dir,subject_number)
-        path = mne_bids.path.BIDSpath(subject=subject_number,task=self.experiment_name, root=self.data_dir, datatype='eyetracking', suffix='eyetracking', extension='.asc',check=False)
+        path = mne_bids.path.BIDSPath(subject=subject_number,task=self.experiment_name, root=self.data_dir, datatype='eyetracking', suffix='eyetracking', extension='.asc',check=False)
         path.mkdir()
 
 
@@ -229,17 +234,17 @@ class Preprocess:
         '''
         return events[['sample','duration','value']].to_numpy().astype(int)
     
-    def make_and_sync_epochs(self,eeg,eeg_events,eye,eye_events,srate=None,eeg_trials_drop=[],eye_trials_drop=[]):
+    def make_and_sync_epochs(self,eeg,eeg_events,eye,eye_events,eeg_trials_drop=[],eye_trials_drop=[]):
         '''
         Function that does basic epoching
         converts EEG and eyetracking raw objects into epochs
         '''
-        if srate is None:
-            srate = eeg.info['sfreq']
+        if self.srate is None:
+            self.srate = eeg.info['sfreq']
         
         # get our events list
         unmatched_codes = list(set(eeg_events['value'].unique()) ^ set(eye_events['value'].unique()))
-        eeg_events = self.convert_bids_events(eeg_events)
+        eeg_events = self.convert_bids_events(eeg_events) # convert event dataframe to mne format (array of sample, duration, value)
         eye_events = self.convert_bids_events(eye_events)
         eeg_events=eeg_events[~ np.isin(eeg_events,unmatched_codes).any(axis=1)]
         eye_events = eye_events[~ np.isin(eye_events,unmatched_codes).any(axis=1)]
@@ -247,8 +252,8 @@ class Preprocess:
         eye_events = self.filter_events(eye_events)
 
         # get EEG epochs object
-        assert eeg.info['sfreq'] % srate == 0
-        decim = eeg.info['sfreq'] / srate
+        assert eeg.info['sfreq'] %  self.srate == 0
+        decim = eeg.info['sfreq'] /  self.srate
 
 
         eeg_epochs = mne.Epochs(eeg,eeg_events,self.event_dict,tmin=self.trial_start_t,tmax=self.trial_end_t,
@@ -258,14 +263,31 @@ class Preprocess:
             eeg_epochs = eeg_epochs.drop_channels(self.drop_channels)
 
 
-        assert eye.info['sfreq'] % srate == 0
-        decim = eye.info['sfreq'] / srate
+        assert eye.info['sfreq'] %  self.srate == 0
+        decim = eye.info['sfreq'] /  self.srate
         eye_epochs = mne.Epochs(eye,eye_events,self.event_dict,tmin=self.trial_start_t,tmax=self.trial_end_t,
                                 on_missing='ignore',baseline=self.baseline_time,reject=None,flat=None,reject_by_annotation=False,preload=True,decim=decim).drop(eye_trials_drop)
         
         eye_epochs.drop_channels(['DIN'])
-        epochs=eeg_epochs.copy()
-        epochs.add_channels([eye_epochs],force_update_info=True)
+
+        if len(eye_epochs) != len(eeg_epochs): # this happens if you abort recording mid trial. Trials should (normally) never be dropped
+            dropped_eye_trials = [trial for trial,reason in enumerate(eye_epochs.drop_log) if len(reason) > 0]
+            dropped_eeg_trials = [trial for trial,reason in enumerate(eeg_epochs.drop_log) if len(reason) > 0]
+            print(f'WARNING: issue with trial count. EEG has {len(eeg_epochs)} trials, eyetracking has {len(eye_epochs)} trials\n.This is likely because you aborted the recording mid trial. If you did not do this, double check your event timings')
+            print(f'Dropping EEG trials: {dropped_eye_trials}')
+            print(f'Dropping Eyetracking trials: {dropped_eeg_trials}')
+            eeg_epochs.drop(dropped_eye_trials)
+            eye_epochs.drop(dropped_eeg_trials)
+
+
+        try:
+            epochs=eeg_epochs.copy()
+            epochs.add_channels([eye_epochs],force_update_info=True)
+        except ValueError as e:
+            print(f'EEG has {len(eeg_epochs.info.ch_names)} channels and {len(eeg_epochs)} trials')
+            print(f'Eyetracking has {len(eye_epochs.info.ch_names)} channels and {len(eye_epochs)} trials')
+            raise e
+
         # there is some code here that runs selections. What does this do??
 
         return epochs
@@ -582,7 +604,7 @@ class Preprocess:
             json.dump(sidecar_data,f,indent=4)
 
 
-        ## BIDS NONCOMPLIANT FROM HERE ON. NOT SURE WHAT TO DO
+        ## BIDS NONCOMPLIANT FROM HERE ON. SUGGESTIONS WELCOME
 
         # SAVE EPOCHS AS FIF AND NPY
 
@@ -603,10 +625,8 @@ class Visualizer:
         sub,
         parent_dir: str,
         srate: float,
-        timelock: float,
         trial_start: float,
         trial_end: float,
-        condition_dict: dict,
         experiment_name: str,
         rejection_time=(None, None),
         win_step: int = SLIDER_STEP,
@@ -617,10 +637,8 @@ class Visualizer:
     ):
         self.sub = sub
         self.parent_dir = parent_dir
-        self.condition_dict = condition_dict
         self.experiment_name = experiment_name
         self.srate = srate
-        self.timelock = timelock / srate
         self.trial_start = trial_start
         self.trial_end = trial_end
         self.win_step = win_step
@@ -641,14 +659,14 @@ class Visualizer:
         self.conditions = pd.read_csv(self.data_path.fpath,sep='\t')['trial_type']
         
         self.data_path.update(suffix='artifacts',extension='.tsv')
-        rej = pd.read_csv(self.data_path.fpath,sep='\t')
+        rej = pd.read_csv(self.data_path.fpath,sep='\t',keep_default_na=False)
         self.rej_chans = rej.apply(np.vectorize(lambda x: len(x) > 0)).to_numpy()
         self.rej_reasons = rej.to_numpy()
 
 
-        self.conditions = np.load(os.path.join(parent_dir, sub, f"{sub}_conditions.npy"))
-        self.rej_chans = np.load(os.path.join(parent_dir, sub, f"{sub}_rej.npy"))
-        self.rej_reasons = np.load(os.path.join(parent_dir, sub, f"{sub}_rej_reasons.npy"), allow_pickle=True)
+        # self.conditions = np.load(os.path.join(parent_dir, sub, f"{sub}_conditions.npy"))
+        # self.rej_chans = np.load(os.path.join(parent_dir, sub, f"{sub}_rej.npy"))
+        # self.rej_reasons = np.load(os.path.join(parent_dir, sub, f"{sub}_rej_reasons.npy"), allow_pickle=True)
         self.channels_ignore = channels_ignore
 
         if channels_drop is not None:
@@ -793,7 +811,7 @@ class Visualizer:
             # self.ax.annotate(self.condition_dict[self.conditions[epoch]], (i * self.epoch_len, self.ylim[1] + 2 * CHAN_OFFSET), annotation_clip=False)
             # self.ax.annotate(f"Trial {epoch}", (i * self.epoch_len + self.epoch_len / 2, self.ylim[1] + 2 * CHAN_OFFSET), annotation_clip=False)
             self.ax.annotate(
-                f"Trial {epoch}\n{self.condition_dict[self.conditions[epoch]]}",
+                f"Trial {epoch}\n{self.conditions[epoch]}",
                 (i * self.epoch_len + self.epoch_len / 2, self.ylim[1] + 1.05 * CHAN_OFFSET),
                 annotation_clip=False,
                 ha="center",
