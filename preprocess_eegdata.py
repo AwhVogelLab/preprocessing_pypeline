@@ -846,7 +846,7 @@ class Visualizer:
         # self.conditions = np.load(os.path.join(parent_dir, sub, f"{sub}_conditions.npy"))
         # self.rej_chans = np.load(os.path.join(parent_dir, sub, f"{sub}_rej.npy"))
         # self.rej_reasons = np.load(os.path.join(parent_dir, sub, f"{sub}_rej_reasons.npy"), allow_pickle=True)
-        self.channels_ignore = channels_ignore
+
 
         if channels_drop is not None:
             channels_drop = [
@@ -860,11 +860,20 @@ class Visualizer:
                     :, ~np.in1d(self.epochs_obj.ch_names, channels_drop)
                 ]
                 self.epochs_obj.drop_channels(channels_drop)
+
+        self.channels_ignore = channels_ignore
+        self.ignored_channels_mask = np.in1d(self.epochs_obj.ch_names, channels_ignore)
+
+        if self.rej_chans.shape[1] != self.ignored_channels_mask.shape[0]:
+            raise ValueError(f'There are {self.rej_chans.shape[1]} channels in the rejection labels,\
+                             but {self.ignored_channels_mask.shape[0]} channels in the data. \
+                             Please make sure that any channels without artifact labels are dropped')
+        
         if channels_ignore is not None:
-            self.rej_chans[:, np.in1d(self.epochs_obj.ch_names, channels_ignore)] = (
+            self.rej_chans[:, self.ignored_channels_mask] = (
                 False
             )
-            self.rej_reasons[:, np.in1d(self.epochs_obj.ch_names, channels_ignore)] = (
+            self.rej_reasons[:, self.ignored_channels_mask] = (
                 None
             )
 
@@ -982,10 +991,16 @@ class Visualizer:
         self.rej_reasons_on = False
 
         self.ax.plot(
-            np.concatenate(self.epochs_pre[pos : pos + self.win_step], 1).T,
-            color="#444444",
+            np.concatenate(self.epochs_pre[pos : pos + self.win_step,~self.ignored_channels_mask], 1).T,
+            color="#000000",
             linewidth=0.75,
         )
+        self.ax.plot(
+            np.concatenate(self.epochs_pre[pos : pos + self.win_step,self.ignored_channels_mask], 1).T,
+            color="#666666",
+            linewidth=0.75,
+        ) # ignored channels in gray
+        
 
         self.ax.set_xlim(*self.xlim)
         self.ax.set_ylim(*self.ylim)
@@ -1052,8 +1067,7 @@ class Visualizer:
         )
         self.ax.set_xticklabels(
             (
-                [int(self.rejection_time[0] * 1000)]
-                + [int(self.rejection_time[1] * 1000)]
+                [int(self.rejection_time[0] * 1000),int(self.rejection_time[1] * 1000)]
             )
             * self.win_step
         )
