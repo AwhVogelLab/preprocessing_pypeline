@@ -962,8 +962,8 @@ class Visualizer:
         self.offset_dict_stacked = {
             "eeg": -self.ys[self.chan_types == 'eeg'][-3], # last 3rd EEG position
             "eog": -self.ys[self.chan_types == 'eog'].mean(), # average of all EOG y positions
-            "eyegaze_left": -self.ys[self.chan_types == 'eyegaze'][0], # TOP of eye gaze
-            "eyegaze_right": -self.ys[self.chan_types == 'eyegaze'][-1], # BOTTOM of eye gaze
+            "eyegaze_x": -self.ys[self.chan_types == 'eyegaze'][0], # TOP of eye gaze
+            "eyegaze_y": -self.ys[self.chan_types == 'eyegaze'][-1], # BOTTOM of eye gaze
 
         }
 
@@ -973,12 +973,12 @@ class Visualizer:
         for ichan in range(epochs_raw.shape[1]):
 
             if self.chan_types[ichan] == 'eyegaze':
-                if 'left' in self.chan_labels[ichan]:
-                    extra_offset = self.offset_dict_stacked['eyegaze_left']
-                elif 'right' in self.chan_labels[ichan]:
-                    extra_offset = self.offset_dict_stacked['eyegaze_right']
+                if 'x' in self.chan_labels[ichan]:
+                    extra_offset = self.offset_dict_stacked['eyegaze_x']
+                elif 'y' in self.chan_labels[ichan]:
+                    extra_offset = self.offset_dict_stacked['eyegaze_y']
                 else:
-                    raise ValueError('Eyegaze channels must be labeled with "left" or "right"')
+                    raise ValueError('Eyegaze channels must be labeled with "x" or "y"')
             else:
                 extra_offset = self.offset_dict_stacked[self.chan_types[ichan]]
                 
