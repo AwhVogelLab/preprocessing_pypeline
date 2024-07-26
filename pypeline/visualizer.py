@@ -395,30 +395,49 @@ class Visualizer:
         # self.ax.set_xticks(np.arange(0,self.epoch_len,0.1 *0 1000/self.srate),np.tile(np.arange(self.trial_start,self.trial_end,0.1),self.win_step))
         # self.ax.tick_params(bottom=False,labelbottom=False)
         # Plot time labels
-        self.ax.set_xticks(
-            sorted(
-                np.concatenate(
-                    (
-                        np.arange(
-                            (self.rejection_time[0] - self.trial_start) * self.srate,
-                            self.epoch_len * self.win_step,
-                            self.epoch_len,
-                        ),
-                        np.arange(
-                            (self.rejection_time[1] - self.trial_start) * self.srate,
-                            self.epoch_len * self.win_step,
-                            self.epoch_len,
-                        ),
+
+
+        if self.rejection_time[0] == self.trial_start and self.rejection_time[1] == self.trial_end:
+            pass
+        elif self.rejection_time[0] == self.trial_start:
+            self.ax.set_xticks(np.arange(
+                                (self.rejection_time[1] - self.trial_start) * self.srate,
+                                self.epoch_len * self.win_step,
+                                self.epoch_len))
+            self.ax.set_xticklabels([int(self.rejection_time[1] * 1000)] * self.win_step)
+
+        elif self.rejection_time[1] == self.trial_end:
+            self.ax.set_xticks(np.arange(
+                    (self.rejection_time[0] - self.trial_start) * self.srate,
+                    self.epoch_len * self.win_step,
+                    self.epoch_len))
+            self.ax.set_xticklabels([int(self.rejection_time[0] * 1000)] * self.win_step)
+
+
+        else:
+            self.ax.set_xticks(sorted(
+                    np.concatenate(
+                        (
+                            np.arange(
+                                (self.rejection_time[0] - self.trial_start) * self.srate,
+                                self.epoch_len * self.win_step,
+                                self.epoch_len,
+                            ),
+                            np.arange(
+                                (self.rejection_time[1] - self.trial_start) * self.srate,
+                                self.epoch_len * self.win_step,
+                                self.epoch_len,
+                            ),
+                        )
                     )
-                )
-            )
-        )
-        self.ax.set_xticklabels(
-            (
-                [int(self.rejection_time[0] * self.srate),int(self.rejection_time[1] * 1000)]
-            )
-            * self.win_step
-        )
+                ))
+            self.ax.set_xticklabels([int(self.rejection_time[0] * self.srate),int(self.rejection_time[1] * 1000)] * self.win_step)
+
+
+
+
+
+
 
 
     def rejection_reasons(self, force_show=False):
