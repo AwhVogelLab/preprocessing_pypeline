@@ -10,28 +10,28 @@ import shutil
 from pathlib import Path
 
 
-
 FILTER_FREQS = (0, 80)  # low, high
+
 
 class Preprocess:
     def __init__(
-        self,                   
-        data_dir: str,                  # where you keep datasets
-        root_dir: str,                  # location of RAW data
-        trial_start: float,             # start of trial (ms)
-        trial_end: float,               # end of trial (ms)
-        stim_conditions: list,          # valid condition labels   
-        timelock_ix: int,               # which position to timelock to (in event_code_dict)
-        event_dict: dict,               # event name: code mapping
-        event_code_dict: dict,          # event code: sequence mapping
-        filter_freqs=FILTER_FREQS,      # frequencies for bandpass filtering
-        srate: int = None,              # data sampling rate (Hz)
-        no_et_spaces: bool = True,      # are there spaces in the eyetracking file?
-        event_names: dict = None,       # names of each annotation
-        baseline_time=None,             # times for baselining
-        rejection_time=(None, None),    # times to do rejection
-        drop_channels=None,             # channels to drop outright (not recommendedd)
-        experiment_name=None,           # name of your experiment
+        self,
+        data_dir: str,  # where you keep datasets
+        root_dir: str,  # location of RAW data
+        trial_start: float,  # start of trial (ms)
+        trial_end: float,  # end of trial (ms)
+        stim_conditions: list,  # valid condition labels
+        timelock_ix: int,  # which position to timelock to (in event_code_dict)
+        event_dict: dict,  # event name: code mapping
+        event_code_dict: dict,  # event code: sequence mapping
+        filter_freqs=FILTER_FREQS,  # frequencies for bandpass filtering
+        srate: int = None,  # data sampling rate (Hz)
+        no_et_spaces: bool = True,  # are there spaces in the eyetracking file?
+        event_names: dict = None,  # names of each annotation
+        baseline_time=None,  # times for baselining
+        rejection_time=(None, None),  # times to do rejection
+        drop_channels=None,  # channels to drop outright (not recommendedd)
+        experiment_name=None,  # name of your experiment
     ):
 
         self.data_dir = data_dir
@@ -43,7 +43,7 @@ class Preprocess:
         self.stim_conditions = stim_conditions
         self.event_code_dict = event_code_dict
         self.event_names = event_names if event_names is not None else event_dict
-        self.event_names.update( # these occasionally appear
+        self.event_names.update(  # these occasionally appear
             {
                 "New Segment/": 99999,
                 "New Segment/LostSamples: 2": 10001,
@@ -118,14 +118,18 @@ class Preprocess:
         self.event_names.update(boundaries)
 
         # drop artifactual extra conditions
-        events_to_keep = np.isin(events[:,2],list(self.event_names.values()))
+        events_to_keep = np.isin(events[:, 2], list(self.event_names.values()))
         if any(~events_to_keep):
-            uq_events,counts = np.unique(events[~events_to_keep,2],return_counts=True)
-            print(f"WARNING: Dropping {np.sum(counts)} events that are not in the event list:" +
-                  '\n'.join([f"{uq_events[i]} ({counts[i]})" for i in range(len(uq_events))]))
+            uq_events, counts = np.unique(
+                events[~events_to_keep, 2], return_counts=True
+            )
+            print(
+                f"WARNING: Dropping {np.sum(counts)} events that are not in the event list:"
+                + "\n".join(
+                    [f"{uq_events[i]} ({counts[i]})" for i in range(len(uq_events))]
+                )
+            )
         events = events[events_to_keep]
-
-
 
         eegdata.set_annotations(None)
 
@@ -151,7 +155,9 @@ class Preprocess:
         # update sidecar with base values
         bids_path.update(extension=".json")
 
-        with open(Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_eeg.json")) as f:
+        with open(
+            Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_eeg.json")
+        ) as f:
             sidecar_base = json.load(f)
 
         mne_bids.update_sidecar_json(bids_path, sidecar_base)
@@ -164,7 +170,6 @@ class Preprocess:
         return eegdata, events
 
     def import_behavior(self, subject_number):
-
         """
         Imports behavioral data into a BIDS-compatible TSV
         """
@@ -229,7 +234,12 @@ class Preprocess:
 
         # save sidecar
         path.update(extension=".json")
-        shutil.copy(Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_eyetracking.json"), path.fpath)
+        shutil.copy(
+            Path(__file__).parent.joinpath(
+                "../base_bids_files/TEMPLATE_eyetracking.json"
+            ),
+            path.fpath,
+        )
         print(
             "WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF"
         )  # option? automatically open this?
@@ -271,7 +281,10 @@ class Preprocess:
 
         # sidecar events
         path.update(extension=".json")
-        shutil.copy(Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_events.json"), path.fpath)
+        shutil.copy(
+            Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_events.json"),
+            path.fpath,
+        )
         print(
             "WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF"
         )  # option? automatically open this?
@@ -299,7 +312,7 @@ class Preprocess:
             eye_events: events structure containing condition codes. These should match the EEG conditions
             eeg_trials_drop: trials to drop from EEG
             eye_trials_drop: trials to drop from eyetracking
-        
+
         Returns:
             epochs: mne epochs object containing combined data
 
@@ -358,8 +371,8 @@ class Preprocess:
             preload=True,
             decim=decim,
         ).drop(eye_trials_drop)
-        
-        if 'DIN' in eye_epochs.info['ch_names']:
+
+        if "DIN" in eye_epochs.info["ch_names"]:
             eye_epochs.drop_channels(["DIN"])
 
         if len(eye_epochs) != len(
@@ -404,7 +417,7 @@ class Preprocess:
         with open(input_file, "r") as f:
             lines = f.readlines()
         newlines = np.array(lines)[
-            [l != "\n" and "ESACC" not in l for l in lines]
+            [l != "\n" and "ESACC" not in l and "EFIX" not in l for l in lines]
         ]  # it breaks with empty lines or saccades, so delete these
         with open(output_file, "w") as f:
             f.writelines(newlines)
@@ -788,4 +801,3 @@ class Preprocess:
         pd.DataFrame(rej_reasons, columns=epochs.info["ch_names"]).to_csv(
             path.fpath, sep="\t", index=False
         )
-
