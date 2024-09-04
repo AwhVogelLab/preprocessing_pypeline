@@ -215,21 +215,46 @@ class Preprocess:
 
         asc_file = glob("*.asc", root_dir=subject_dir)
         if len(asc_file) == 0:
-            raise FileNotFoundError("You need to convert the edf file to asc first")
+            raise FileNotFoundError(
+                "No .asc file. Are you sure you remembered to convert it?"
+            )
             # TODO: automatically convert edf files
-        if len(asc_file) > 1:
-            raise RuntimeError("More than 1 asc file present in subject directory")
-        asc_file = os.path.join(subject_dir, asc_file[0])
 
-        if self.no_et_spaces:
-            shutil.copy2(asc_file, path.fpath)
-        else:
-            self.remove_eyetrack_spaces(asc_file, path.fpath)
+        if len(asc_file) == 1:
+            asc_file = os.path.join(subject_dir, asc_file[0])
 
-        # load in eye tracker data
-        eye = mne.io.read_raw_eyelink(
-            path.fpath, create_annotations=["blinks", "messages"]
-        )
+            if self.no_et_spaces:
+                shutil.copy2(asc_file, path.fpath)
+            else:
+                self.remove_eyetrack_spaces(asc_file, path.fpath)
+
+            # load in eye tracker data
+            eye = mne.io.read_raw_eyelink(
+                path.fpath, create_annotations=["blinks", "messages"]
+            )
+
+        else:  # more than one asc
+            print(
+                "More than 1 asc file present in subject directory. They will be concatenated in alphabetical order"
+            )
+            raws = []
+            for ifile, file in enumerate(asc_file):
+                file = os.path.join(subject_dir, file)
+
+                ascpath = path.copy().update(split=ifile + 1)
+
+                if self.no_et_spaces:
+                    shutil.copy2(file, ascpath.fpath)
+                else:
+                    self.remove_eyetrack_spaces(file, ascpath.fpath)
+
+                raws.append(
+                    mne.io.read_raw_eyelink(
+                        ascpath.fpath, create_annotations=["blinks", "messages"]
+                    )
+                )
+            eye = mne.concatenate_raws(raws)
+
         et_events, et_event_dict = mne.events_from_annotations(eye)
 
         # save sidecar
