@@ -186,12 +186,13 @@ class Preprocess:
             if "beh" in f:
                 pd.read_csv(f).to_csv(path.fpath, sep="\t")
 
-    def import_eyetracker(self, subject_number, overwrite=False):
+    def import_eyetracker(self, subject_number, keyword=None):
         """Loads in eyetracking data for a subject
 
         Args:
             subject_dir (str): directory where subject's data is found. Should contain ONE .asc file.
             It will be automatically converted if necessary
+            keyword (str, default none): the keyword you use before sync codes
 
 
         Returns:
@@ -263,7 +264,9 @@ class Preprocess:
                     raise e
             eye = mne.concatenate_raws(raws)
 
-        et_events, et_event_dict = mne.events_from_annotations(eye)
+        keyword = "" if keyword is None else keyword
+        regexp = f"^{keyword}(?![Bb][Aa][Dd]|[Ee][Dd][Gg][Ee]).*$"
+        et_events, et_event_dict = mne.events_from_annotations(eye, regexp=regexp)
 
         # save sidecar
         path.update(extension=".json")
@@ -281,13 +284,8 @@ class Preprocess:
 
         et_events_dict_convert = {}
         for k, v in et_event_dict.items():
-            try:
-                new_k = int(k.split(" ")[-1])
-                et_events_dict_convert[v] = new_k
-            except (
-                ValueError
-            ):  # once got 'ELCL_PROC CENTROID (3)' as a key, which seems separate from the rest
-                pass
+            new_k = int(k.split(" ")[-1])
+            et_events_dict_convert[v] = new_k
         et_events_converted = et_events.copy()
         for code in et_events_dict_convert.keys():
             et_events_converted[:, 2][et_events[:, 2] == code] = et_events_dict_convert[
@@ -303,9 +301,6 @@ class Preprocess:
         eye_events["sample"] = et_events_converted[:, 0]
         eye_events["value"] = et_events_converted[:, 2]
         eye_events["onset"] = eye_events["sample"] / 1000
-        eye_trial_types = {
-            int(re.findall("\d+", k)[0]): k for k in et_event_dict.keys()
-        }
         event_names_inv = {v: k for k, v in self.event_names.items()}
         get_events = lambda trl: event_names_inv[trl["value"]]
         eye_events["trial_type"] = eye_events.apply(get_events, axis=1)
