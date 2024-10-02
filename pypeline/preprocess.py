@@ -331,6 +331,49 @@ class Preprocess:
         """
         return events[["sample", "duration", "value"]].to_numpy().astype(int)
 
+    def make_eeg_epochs(self, eeg, eeg_events, eeg_trials_drop=[]):
+        """
+        Function that handles epoching for EEG data. A replacement for make_and_sync_epochs when you don't want eyetracking
+
+        Args:
+            eeg: mne raw object containing EEG data
+            eeg_events: events structure containing condition codes. These should match the eyetracking conditions
+            eeg_trials_drop: trials to drop from EEG
+
+        Returns:
+            epochs: mne epochs object containing data
+        """
+        if self.srate is None:
+            self.srate = eeg.info["sfreq"]
+
+        # convert event dataframe to mne format (array of sample, duration, value)
+        eeg_events = self.convert_bids_events(eeg_events)
+        eeg_events = self.filter_events(eeg_events)
+
+        # get EEG epochs object
+        assert eeg.info["sfreq"] % self.srate == 0
+        decim = eeg.info["sfreq"] / self.srate
+
+        epochs = mne.Epochs(
+            eeg,
+            eeg_events,
+            self.event_dict,
+            tmin=self.trial_start_t,
+            tmax=self.trial_end_t,
+            on_missing="ignore",
+            baseline=self.baseline_time,
+            reject_tmin=self.rejection_time[0],
+            reject_tmax=self.rejection_time[1],
+            preload=True,
+            decim=decim,
+        ).drop(
+            eeg_trials_drop
+        )  # set up epochs object
+        if self.drop_channels is not None:
+            eeg_epochs = eeg_epochs.drop_channels(self.drop_channels)
+
+        return epochs
+
     def make_and_sync_epochs(
         self, eeg, eeg_events, eye, eye_events, eeg_trials_drop=[], eye_trials_drop=[]
     ):
@@ -357,9 +400,8 @@ class Preprocess:
         unmatched_codes = list(
             set(eeg_events["value"].unique()) ^ set(eye_events["value"].unique())
         )
-        eeg_events = self.convert_bids_events(
-            eeg_events
-        )  # convert event dataframe to mne format (array of sample, duration, value)
+        # convert event dataframe to mne format (array of sample, duration, value)
+        eeg_events = self.convert_bids_events(eeg_events)
         eye_events = self.convert_bids_events(eye_events)
         eeg_events = eeg_events[~np.isin(eeg_events, unmatched_codes).any(axis=1)]
         eye_events = eye_events[~np.isin(eye_events, unmatched_codes).any(axis=1)]
