@@ -503,6 +503,13 @@ class Preprocess:
             np.floor(dur * epochs.info["sfreq"] / 1000)
         )  # convert ms to timepoints
 
+    def artreject_nan(self, epochs):
+        """
+        Rejects trials that contain any nan values
+        """
+        eegdata = self.get_data_from_rej_period(epochs)
+        return np.any(np.isnan(eegdata), 2)
+
     def artreject_slidingP2P(self, epochs, rejection_criteria, win=200, win_step=100):
         """
         Runs artifact rejection baased on a sliding window
@@ -534,8 +541,8 @@ class Preprocess:
             chans = chan_types == chan_type
             threshold = rejection_criteria[chan_type]
             for st in win_starts:
-                data_min = eegdata[:, chans, st : st + win].min(axis=2)
-                data_max = eegdata[:, chans, st : st + win].max(axis=2)
+                data_min = np.nanmin(eegdata[:, chans, st : st + win], axis=2)
+                data_max = np.nanmax(eegdata[:, chans, st : st + win], axis=2)
                 rej_chans[:, chans] = np.logical_or(
                     rej_chans[:, chans], (data_max - data_min) > threshold
                 )
@@ -563,8 +570,8 @@ class Preprocess:
             chans = chan_types == chan_type
             threshold = rejection_criteria[chan_type]
 
-            data_min = eegdata[:, chans].min(axis=2)
-            data_max = eegdata[:, chans].max(axis=2)
+            data_min = np.nanmin(eegdata[:, chans], axis=2)
+            data_max = np.nanmax(eegdata[:, chans], axis=2)
             rej_chans[:, chans] = np.logical_or(
                 data_max > threshold, data_min < -1 * threshold
             )
@@ -599,8 +606,10 @@ class Preprocess:
             threshold = rejection_criteria[chan_type]
             for st in win_starts:
 
-                first_half = eegdata[:, chans, st : st + win // 2].mean(axis=2)
-                last_half = eegdata[:, chans, st + win // 2 : st + win].mean(axis=2)
+                first_half = np.nanmean(eegdata[:, chans, st : st + win // 2], axis=2)
+                last_half = np.nanmean(
+                    eegdata[:, chans, st + win // 2 : st + win], axis=2
+                )
                 rej_chans[:, chans] = np.logical_or(
                     rej_chans[:, chans], np.abs(first_half - last_half) > threshold
                 )
@@ -648,7 +657,7 @@ class Preprocess:
         rej_linear = np.logical_and(r2s > min_r2, slopes > min_slope)
         return rej_linear
 
-    def artreject_flatline(self, epochs, rejection_criteria, flatline_duration):
+    def artreject_flatline(self, epochs, rejection_criteria, flatline_duration=200):
         """
         Rejects channels with flatline behavior (more than [flatline_duration] ms of the same value)
         You should probably only run this on EEG channels...
