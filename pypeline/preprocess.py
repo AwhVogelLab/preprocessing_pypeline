@@ -326,7 +326,7 @@ class Preprocess:
         """
         return events[["sample", "duration", "value"]].to_numpy().astype(int)
 
-    def make_eeg_epochs(self, eeg, eeg_events, eeg_trials_drop=[]):
+    def make_eeg_epochs(self, eeg, eeg_events, eeg_trials_drop=None):
         """
         Function that handles epoching for EEG data. A replacement for make_and_sync_epochs when you don't want eyetracking
 
@@ -338,6 +338,9 @@ class Preprocess:
         Returns:
             epochs: mne epochs object containing data
         """
+
+        if eeg_trials_drop is None:
+            eeg_trials_drop = []
         if self.srate is None:
             self.srate = eeg.info["sfreq"]
 
@@ -370,7 +373,13 @@ class Preprocess:
         return epochs
 
     def make_and_sync_epochs(
-        self, eeg, eeg_events, eye, eye_events, eeg_trials_drop=[], eye_trials_drop=[]
+        self,
+        eeg,
+        eeg_events,
+        eye,
+        eye_events,
+        eeg_trials_drop=None,
+        eye_trials_drop=None,
     ):
         """
         Function that does basic epoching
@@ -388,6 +397,10 @@ class Preprocess:
             epochs: mne epochs object containing combined data
 
         """
+        if eeg_trials_drop is None:
+            eeg_trials_drop = []
+        if eye_trials_drop is None:
+            eye_trials_drop = []
         if self.srate is None:
             self.srate = eeg.info["sfreq"]
 
