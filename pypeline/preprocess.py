@@ -53,12 +53,8 @@ class Preprocess:
         self.filter_freqs = filter_freqs
         self.no_et_spaces = no_et_spaces
         self.baseline_time = baseline_time
-        rejection_time[0] = (
-            trial_start if rejection_time[0] is None else rejection_time[0]
-        )
-        rejection_time[1] = (
-            trial_end if rejection_time[1] is None else rejection_time[1]
-        )
+        rejection_time[0] = trial_start if rejection_time[0] is None else rejection_time[0]
+        rejection_time[1] = trial_end if rejection_time[1] is None else rejection_time[1]
         self.rejection_time = rejection_time
         self.drop_channels = drop_channels
         self.experiment_name = experiment_name
@@ -107,9 +103,7 @@ class Preprocess:
 
                 eegfile = os.path.join(subject_dir, file)  # search for vhdr file
                 raws.append(
-                    mne.io.read_raw_brainvision(
-                        eegfile, eog=["HEOG", "VEOG"], misc=["StimTrak"], preload=False
-                    )
+                    mne.io.read_raw_brainvision(eegfile, eog=["HEOG", "VEOG"], misc=["StimTrak"], preload=False)
                 )
             eegdata = mne.concatenate_raws(raws)
 
@@ -120,14 +114,10 @@ class Preprocess:
         # drop artifactual extra conditions
         events_to_keep = np.isin(events[:, 2], list(self.event_names.values()))
         if any(~events_to_keep):
-            uq_events, counts = np.unique(
-                events[~events_to_keep, 2], return_counts=True
-            )
+            uq_events, counts = np.unique(events[~events_to_keep, 2], return_counts=True)
             print(
                 f"WARNING: Dropping {np.sum(counts)} events that are not in the event list:"
-                + "\n".join(
-                    [f"{uq_events[i]} ({counts[i]})" for i in range(len(uq_events))]
-                )
+                + "\n".join([f"{uq_events[i]} ({counts[i]})" for i in range(len(uq_events))])
             )
         events = events[events_to_keep]
 
@@ -155,17 +145,13 @@ class Preprocess:
         # update sidecar with base values
         bids_path.update(extension=".json")
 
-        with open(
-            Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_eeg.json")
-        ) as f:
+        with open(Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_eeg.json")) as f:
             sidecar_base = json.load(f)
 
         mne_bids.update_sidecar_json(bids_path, sidecar_base)
 
         # events,_ = mne.events_from_annotations(eegdata)
-        events = pd.read_csv(
-            bids_path.copy().update(suffix="events", extension=".tsv").fpath, sep="\t"
-        )
+        events = pd.read_csv(bids_path.copy().update(suffix="events", extension=".tsv").fpath, sep="\t")
 
         return eegdata, events
 
@@ -216,9 +202,7 @@ class Preprocess:
 
         asc_file = glob("*.asc", root_dir=subject_dir)
         if len(asc_file) == 0:
-            raise FileNotFoundError(
-                "No .asc file. Are you sure you remembered to convert it?"
-            )
+            raise FileNotFoundError("No .asc file. Are you sure you remembered to convert it?")
             # TODO: automatically convert edf files
 
         if len(asc_file) == 1:
@@ -230,14 +214,10 @@ class Preprocess:
                 self.remove_eyetrack_spaces(asc_file, path.fpath)
 
             # load in eye tracker data
-            eye = mne.io.read_raw_eyelink(
-                path.fpath, create_annotations=["blinks", "messages"]
-            )
+            eye = mne.io.read_raw_eyelink(path.fpath, create_annotations=["blinks", "messages"])
 
         else:  # more than one asc
-            print(
-                "More than 1 asc file present in subject directory. They will be concatenated in alphabetical order"
-            )
+            print("More than 1 asc file present in subject directory. They will be concatenated in alphabetical order")
             raws = []
             for ifile, file in enumerate(asc_file):
                 file = os.path.join(subject_dir, file)
@@ -250,11 +230,7 @@ class Preprocess:
                     self.remove_eyetrack_spaces(file, ascpath.fpath)
 
                 try:
-                    raws.append(
-                        mne.io.read_raw_eyelink(
-                            ascpath.fpath, create_annotations=["blinks", "messages"]
-                        )
-                    )
+                    raws.append(mne.io.read_raw_eyelink(ascpath.fpath, create_annotations=["blinks", "messages"]))
                 except ValueError as e:
                     print(
                         f"Error reading {ascpath.fpath}. This may be due to a bug in mne if your eyetracking file"
@@ -271,14 +247,10 @@ class Preprocess:
         # save sidecar
         path.update(extension=".json")
         shutil.copy(
-            Path(__file__).parent.joinpath(
-                "../base_bids_files/TEMPLATE_eyetracking.json"
-            ),
+            Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_eyetracking.json"),
             path.fpath,
         )
-        print(
-            "WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF"
-        )  # option? automatically open this?
+        print("WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF")  # option? automatically open this?
 
         # convert events to match the EEG events
 
@@ -288,16 +260,12 @@ class Preprocess:
             et_events_dict_convert[v] = new_k
         et_events_converted = et_events.copy()
         for code in et_events_dict_convert.keys():
-            et_events_converted[:, 2][et_events[:, 2] == code] = et_events_dict_convert[
-                code
-            ]
+            et_events_converted[:, 2][et_events[:, 2] == code] = et_events_dict_convert[code]
 
         # save events as TSV
         path.update(suffix="events", extension=".tsv")
 
-        eye_events = pd.DataFrame(
-            columns=["onset", "duration", "trial_type", "value", "sample"]
-        )
+        eye_events = pd.DataFrame(columns=["onset", "duration", "trial_type", "value", "sample"])
         eye_events["sample"] = et_events_converted[:, 0]
         eye_events["value"] = et_events_converted[:, 2]
         eye_events["onset"] = eye_events["sample"] / 1000
@@ -313,9 +281,7 @@ class Preprocess:
             Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_events.json"),
             path.fpath,
         )
-        print(
-            "WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF"
-        )  # option? automatically open this?
+        print("WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF")  # option? automatically open this?
 
         return eye, eye_events
 
@@ -405,9 +371,7 @@ class Preprocess:
             self.srate = eeg.info["sfreq"]
 
         # get our events list
-        unmatched_codes = list(
-            set(eeg_events["value"].unique()) ^ set(eye_events["value"].unique())
-        )
+        unmatched_codes = list(set(eeg_events["value"].unique()) ^ set(eye_events["value"].unique()))
         # convert event dataframe to mne format (array of sample, duration, value)
         eeg_events = self.convert_bids_events(eeg_events)
         eye_events = self.convert_bids_events(eye_events)
@@ -461,16 +425,8 @@ class Preprocess:
         if len(eye_epochs) != len(
             eeg_epochs
         ):  # this happens if you abort recording mid trial. Trials should (normally) never be dropped
-            dropped_eye_trials = [
-                trial
-                for trial, reason in enumerate(eye_epochs.drop_log)
-                if len(reason) > 0
-            ]
-            dropped_eeg_trials = [
-                trial
-                for trial, reason in enumerate(eeg_epochs.drop_log)
-                if len(reason) > 0
-            ]
+            dropped_eye_trials = [trial for trial, reason in enumerate(eye_epochs.drop_log) if len(reason) > 0]
+            dropped_eeg_trials = [trial for trial, reason in enumerate(eeg_epochs.drop_log) if len(reason) > 0]
             print(
                 f"WARNING: issue with trial count. EEG has {len(eeg_epochs)} trials, eyetracking has {len(eye_epochs)} trials\n.This is likely because you aborted the recording mid trial. If you did not do this, double check your event timings"
             )
@@ -483,12 +439,8 @@ class Preprocess:
             epochs = eeg_epochs.copy()
             epochs.add_channels([eye_epochs], force_update_info=True)
         except ValueError as e:
-            print(
-                f"EEG has {len(eeg_epochs.info.ch_names)} channels and {len(eeg_epochs)} trials"
-            )
-            print(
-                f"Eyetracking has {len(eye_epochs.info.ch_names)} channels and {len(eye_epochs)} trials"
-            )
+            print(f"EEG has {len(eeg_epochs.info.ch_names)} channels and {len(eeg_epochs)} trials")
+            print(f"Eyetracking has {len(eye_epochs.info.ch_names)} channels and {len(eye_epochs)} trials")
             raise e
 
         # there is some code here that runs selections. What does this do??
@@ -514,22 +466,19 @@ class Preprocess:
         if isinstance(chan_labels, list):
             chan_labels = np.array(chan_labels)
         if np.all(
-            [
-                eye_chan in chan_labels
-                for eye_chan in ["xpos_right", "xpos_left", "ypos_right", "ypos_left"]
-            ]
+            [eye_chan in chan_labels for eye_chan in ["xpos_right", "xpos_left", "ypos_right", "ypos_left"]]
         ):  # TODO: triple check this works
             # x_chans = chan_labels[[len(re.findall('xpos',c)) > 0 for c in chan_labels]]
             # y_chans = chan_labels[[len(re.findall('ypos',c)) > 0 for c in chan_labels]]
             x_chans = chan_labels[["xpos" in c for c in chan_labels]]
             y_chans = chan_labels[["ypos" in c for c in chan_labels]]
 
-            rej_chans[:, np.isin(chan_labels, x_chans)] = rej_chans[
-                :, np.isin(chan_labels, x_chans)
-            ].all(axis=1)[:, np.newaxis]
-            rej_chans[:, np.isin(chan_labels, y_chans)] = rej_chans[
-                :, np.isin(chan_labels, y_chans)
-            ].all(axis=1)[:, np.newaxis]
+            rej_chans[:, np.isin(chan_labels, x_chans)] = rej_chans[:, np.isin(chan_labels, x_chans)].all(axis=1)[
+                :, np.newaxis
+            ]
+            rej_chans[:, np.isin(chan_labels, y_chans)] = rej_chans[:, np.isin(chan_labels, y_chans)].all(axis=1)[
+                :, np.newaxis
+            ]
         return rej_chans
 
     def get_data_from_rej_period(self, epochs):
@@ -549,9 +498,7 @@ class Preprocess:
         """
         convert a duration in ms to timepoints
         """
-        return int(
-            np.floor(dur * epochs.info["sfreq"] / 1000)
-        )  # convert ms to timepoints
+        return int(np.floor(dur * epochs.info["sfreq"] / 1000))  # convert ms to timepoints
 
     def artreject_nan(self, epochs):
         """
@@ -593,9 +540,7 @@ class Preprocess:
             for st in win_starts:
                 data_min = np.nanmin(eegdata[:, chans, st : st + win], axis=2)
                 data_max = np.nanmax(eegdata[:, chans, st : st + win], axis=2)
-                rej_chans[:, chans] = np.logical_or(
-                    rej_chans[:, chans], (data_max - data_min) > threshold
-                )
+                rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], (data_max - data_min) > threshold)
 
         # if both eyes are recorded, then ONLY mark artifacts if they appear in both eyes
         rej_chans = self.check_both_eyes(epochs.ch_names, rej_chans)
@@ -622,9 +567,7 @@ class Preprocess:
 
             data_min = np.nanmin(eegdata[:, chans], axis=2)
             data_max = np.nanmax(eegdata[:, chans], axis=2)
-            rej_chans[:, chans] = np.logical_or(
-                data_max > threshold, data_min < -1 * threshold
-            )
+            rej_chans[:, chans] = np.logical_or(data_max > threshold, data_min < -1 * threshold)
 
         # if both eyes are recorded, then ONLY mark artifacts if they appear in both eyes
         rej_chans = self.check_both_eyes(epochs.ch_names, rej_chans)
@@ -657,12 +600,8 @@ class Preprocess:
             for st in win_starts:
 
                 first_half = np.nanmean(eegdata[:, chans, st : st + win // 2], axis=2)
-                last_half = np.nanmean(
-                    eegdata[:, chans, st + win // 2 : st + win], axis=2
-                )
-                rej_chans[:, chans] = np.logical_or(
-                    rej_chans[:, chans], np.abs(first_half - last_half) > threshold
-                )
+                last_half = np.nanmean(eegdata[:, chans, st + win // 2 : st + win], axis=2)
+                rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], np.abs(first_half - last_half) > threshold)
 
         # if both eyes are recorded, then ONLY mark artifacts if they appear in both eyes
         rej_chans = self.check_both_eyes(epochs.ch_names, rej_chans)
@@ -680,9 +619,7 @@ class Preprocess:
         """
 
         eegdata = self.get_data_from_rej_period(epochs)
-        chans = (
-            np.array(epochs.info.get_channel_types()) == "eeg"
-        )  # TODO: make more flexible?
+        chans = np.array(epochs.info.get_channel_types()) == "eeg"  # TODO: make more flexible?
 
         # Note, using times from the epochs object means that slope will always be in V/S units
         xs = epochs.times[
@@ -701,9 +638,7 @@ class Preprocess:
                 A, eegdata[itrial, chans].T, rcond=None
             )
 
-        r2s = 1 - ssrs / (
-            eegdata.shape[2] * eegdata.var(axis=2)
-        )  # double check value for n
+        r2s = 1 - ssrs / (eegdata.shape[2] * eegdata.var(axis=2))  # double check value for n
         rej_linear = np.logical_and(r2s > min_r2, slopes > min_slope)
         return rej_linear
 
@@ -787,14 +722,10 @@ class Preprocess:
                 else:
                     new_events.append(code)
                     new_times.append(events[i + self.timelock_ix, 0])
-        new_event_list = np.stack(
-            (new_times, np.zeros(len(new_times)), new_events), axis=1
-        ).astype(int)
+        new_event_list = np.stack((new_times, np.zeros(len(new_times)), new_events), axis=1).astype(int)
         return new_event_list
 
-    def deg2pix(
-        self, eyeMoveThresh=1, distFromScreen=800, monitorWidth=532, screenResX=1920
-    ):
+    def deg2pix(self, eyeMoveThresh=1, distFromScreen=800, monitorWidth=532, screenResX=1920):
         """Converts degrees visual angle to a pixel value
 
         Args:
@@ -841,16 +772,12 @@ class Preprocess:
 
         # EVENTS
 
-        events_final = pd.DataFrame(
-            epochs.events, columns=["sample", "duration", "value"]
-        )
+        events_final = pd.DataFrame(epochs.events, columns=["sample", "duration", "value"])
         event_dict_inv = {v: k for k, v in self.event_dict.items()}
         get_events = lambda trl: event_dict_inv[trl["value"]]
         events_final["trial_type"] = events_final.apply(get_events, axis=1)
         events_final["onset"] = events_final["sample"] / self.srate
-        events_final = events_final[
-            ["onset", "duration", "trial_type", "value", "sample"]
-        ]
+        events_final = events_final[["onset", "duration", "trial_type", "value", "sample"]]
 
         path.update(suffix="events", extension=".tsv")
         events_final.to_csv(path.fpath, sep="\t", index=False)
@@ -887,9 +814,5 @@ class Preprocess:
         np.save(path.fpath, epochs.get_data())
 
         # ARTIFACTS
-        path.update(
-            suffix="artifacts", extension=".tsv", check=False
-        )  # manually forcing us to allow an artifacts file
-        pd.DataFrame(rej_reasons, columns=epochs.info["ch_names"]).to_csv(
-            path.fpath, sep="\t", index=False
-        )
+        path.update(suffix="artifacts", extension=".tsv", check=False)  # manually forcing us to allow an artifacts file
+        pd.DataFrame(rej_reasons, columns=epochs.info["ch_names"]).to_csv(path.fpath, sep="\t", index=False)

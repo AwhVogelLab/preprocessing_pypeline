@@ -12,7 +12,6 @@ import re
 from pathlib import Path
 
 
-
 # FOR PLOTTING
 SLIDER_STEP = 5  #
 
@@ -45,12 +44,8 @@ class Visualizer:
         self.trial_end = trial_end
         self.win_step = win_step
         self.epoch_len = np.ceil((trial_end - trial_start) * srate)
-        rejection_time[0] = (
-            trial_start if rejection_time[0] is None else rejection_time[0]
-        )
-        rejection_time[1] = (
-            trial_end if rejection_time[1] is None else rejection_time[1]
-        )
+        rejection_time[0] = trial_start if rejection_time[0] is None else rejection_time[0]
+        rejection_time[1] = trial_end if rejection_time[1] is None else rejection_time[1]
         self.rejection_time = rejection_time
         self.downscale = downscale
         self.chan_offset = chan_offset
@@ -80,35 +75,26 @@ class Visualizer:
         # self.rej_chans = np.load(os.path.join(parent_dir, sub, f"{sub}_rej.npy"))
         # self.rej_reasons = np.load(os.path.join(parent_dir, sub, f"{sub}_rej_reasons.npy"), allow_pickle=True)
 
-
         if channels_drop is not None:
-            channels_drop = [
-                ch for ch in channels_drop if ch in self.epochs_obj.ch_names
-            ]
+            channels_drop = [ch for ch in channels_drop if ch in self.epochs_obj.ch_names]
             if len(channels_drop) > 0:
-                self.rej_chans = self.rej_chans[
-                    :, ~np.in1d(self.epochs_obj.ch_names, channels_drop)
-                ]
-                self.rej_reasons = self.rej_reasons[
-                    :, ~np.in1d(self.epochs_obj.ch_names, channels_drop)
-                ]
+                self.rej_chans = self.rej_chans[:, ~np.in1d(self.epochs_obj.ch_names, channels_drop)]
+                self.rej_reasons = self.rej_reasons[:, ~np.in1d(self.epochs_obj.ch_names, channels_drop)]
                 self.epochs_obj.drop_channels(channels_drop)
 
         self.channels_ignore = channels_ignore
         self.ignored_channels_mask = np.in1d(self.epochs_obj.ch_names, channels_ignore)
 
         if self.rej_chans.shape[1] != self.ignored_channels_mask.shape[0]:
-            raise ValueError(f'There are {self.rej_chans.shape[1]} channels in the rejection labels,\
+            raise ValueError(
+                f"There are {self.rej_chans.shape[1]} channels in the rejection labels,\
                              but {self.ignored_channels_mask.shape[0]} channels in the data. \
-                             Please make sure that any channels without artifact labels are dropped')
-        
+                             Please make sure that any channels without artifact labels are dropped"
+            )
+
         if channels_ignore is not None:
-            self.rej_chans[:, self.ignored_channels_mask] = (
-                False
-            )
-            self.rej_reasons[:, self.ignored_channels_mask] = (
-                None
-            )
+            self.rej_chans[:, self.ignored_channels_mask] = False
+            self.rej_reasons[:, self.ignored_channels_mask] = None
 
         self.rej_manual = self.rej_chans.any(1)
 
@@ -123,7 +109,6 @@ class Visualizer:
                 mne.pick_types(self.info, misc=True),
             )
         )
-        
 
         self.chan_labels = np.array(self.epochs_obj.ch_names)[self.chan_order]
         self.rej_chans = self.rej_chans[:, self.chan_order]
@@ -161,8 +146,6 @@ class Visualizer:
             "misc": chan_offset * 5,
         }  # must be in order and increasing
 
-
-
         epochs_raw = self.epochs_raw.copy()
 
         epochs_raw = epochs_raw[:, self.chan_order]
@@ -171,77 +154,59 @@ class Visualizer:
 
         self.epochs_pre = np.full(epochs_raw.shape, np.nan)
 
-
         self.ys = []
         for ichan in range(epochs_raw.shape[1]):
             extra_offset = self.offset_dict[self.chan_types[ichan]]
             downscale_factor = downscale[self.chan_types[ichan]]
-            self.epochs_pre[:, ichan] = (
-                (epochs_raw[:, ichan] * downscale_factor)
-                - chan_offset * ichan
-                - extra_offset
-            )
+            self.epochs_pre[:, ichan] = (epochs_raw[:, ichan] * downscale_factor) - chan_offset * ichan - extra_offset
             self.ys.append(-1 * chan_offset * ichan - extra_offset)
         self.ys = np.array(self.ys)
 
         self.ylim = (
             np.nanpercentile(self.epochs_pre[:, -1], 5)
             - chan_offset * 1.5,  # 5th percentile of lowest channel + 2 chans
-            np.nanpercentile(self.epochs_pre[:, 0], 95)
-            + chan_offset * 1.5,  # 95th percentile of highest + 2 chans
+            np.nanpercentile(self.epochs_pre[:, 0], 95) + chan_offset * 1.5,  # 95th percentile of highest + 2 chans
         )
 
-
         self.offset_dict_stacked = {
-            "eeg": -self.ys[self.chan_types == 'eeg'][-3], # last 3rd EEG position
-            "eog": -self.ys[self.chan_types == 'eog'].mean(), # average of all EOG y positions
-            "eyegaze_x": -self.ys[self.chan_types == 'eyegaze'][0], # TOP of eye gaze
-            "eyegaze_y": -self.ys[self.chan_types == 'eyegaze'][-1], # BOTTOM of eye gaze
-
+            "eeg": -self.ys[self.chan_types == "eeg"][-3],  # last 3rd EEG position
+            "eog": -self.ys[self.chan_types == "eog"].mean(),  # average of all EOG y positions
+            "eyegaze_x": -self.ys[self.chan_types == "eyegaze"][0],  # TOP of eye gaze
+            "eyegaze_y": -self.ys[self.chan_types == "eyegaze"][-1],  # BOTTOM of eye gaze
         }
-
 
         self.epochs_stacked = np.full(epochs_raw.shape, np.nan)
         self.ys_stacked = []
         for ichan in range(epochs_raw.shape[1]):
 
-            if self.chan_types[ichan] == 'eyegaze':
-                if 'x' in self.chan_labels[ichan]:
-                    extra_offset = self.offset_dict_stacked['eyegaze_x']
-                elif 'y' in self.chan_labels[ichan]:
-                    extra_offset = self.offset_dict_stacked['eyegaze_y']
+            if self.chan_types[ichan] == "eyegaze":
+                if "x" in self.chan_labels[ichan]:
+                    extra_offset = self.offset_dict_stacked["eyegaze_x"]
+                elif "y" in self.chan_labels[ichan]:
+                    extra_offset = self.offset_dict_stacked["eyegaze_y"]
                 else:
                     raise ValueError('Eyegaze channels must be labeled with "x" or "y"')
             else:
                 extra_offset = self.offset_dict_stacked[self.chan_types[ichan]]
-                
+
             downscale_factor = downscale[self.chan_types[ichan]]
-            self.epochs_stacked[:, ichan] = (
-                (epochs_raw[:, ichan] * downscale_factor)
-                - extra_offset
-            )
-            self.ys_stacked.append(-extra_offset)    
+            self.epochs_stacked[:, ichan] = (epochs_raw[:, ichan] * downscale_factor) - extra_offset
+            self.ys_stacked.append(-extra_offset)
         self.ys_stacked = np.array(self.ys_stacked)
         self.ylim_stacked = (
             np.nanpercentile(self.epochs_stacked[:, -1], 5)
             - chan_offset * 1.5,  # 5th percentile of lowest channel + 2 chans
-            np.nanpercentile(self.epochs_stacked[:, 0], 95)
-            + chan_offset * 1.5,  # 95th percentile of highest + 2 chans
+            np.nanpercentile(self.epochs_stacked[:, 0], 95) + chan_offset * 1.5,  # 95th percentile of highest + 2 chans
         )
-        
 
     def open_figure(self, color="white"):
         self.stack = False
         self.fig, self.ax = plt.subplots()
-        self.fig.canvas.manager.set_window_title(
-            f"EEG Viewer - Subject {self.sub} (press H for help)"
-        )
+        self.fig.canvas.manager.set_window_title(f"EEG Viewer - Subject {self.sub} (press H for help)")
 
         self.plot_pos(0)
         axis_position = plt.axes([0.2, -0.1, 0.65, 0.03], facecolor=color)
-        self.slider = Slider(
-            axis_position, "Pos", 0, self.epochs_pre.shape[0], valstep=1
-        )
+        self.slider = Slider(axis_position, "Pos", 0, self.epochs_pre.shape[0], valstep=1)
         self.fig.canvas.mpl_connect("key_press_event", self.keypress_event)
         self.fig.canvas.mpl_connect("button_press_event", self.click_toggle)
 
@@ -267,27 +232,25 @@ class Visualizer:
         self.help_ax.set_axis_off()
         self.help_ax.set_visible(False)
 
-
-    def plot_channels(self,epochs,pos):
-        '''
+    def plot_channels(self, epochs, pos):
+        """
         Helper function to plot channel data
 
         Args:
             epochs: numpy array of shape (trials (n epochs to plot), channels, timepoints)
             pos: int, the position of the slider
-        '''
+        """
         self.ax.plot(
-            np.concatenate(epochs[pos:pos + self.win_step,~self.ignored_channels_mask], 1).T,
+            np.concatenate(epochs[pos : pos + self.win_step, ~self.ignored_channels_mask], 1).T,
             color="#000000",
             linewidth=0.75,
-        ) # good channels
-
+        )  # good channels
 
         self.ax.plot(
-            np.concatenate(epochs[pos:pos + self.win_step,self.ignored_channels_mask], 1).T,
+            np.concatenate(epochs[pos : pos + self.win_step, self.ignored_channels_mask], 1).T,
             color="#666666",
             linewidth=0.75,
-        ) # ignored channels in gray
+        )  # ignored channels in gray
 
         for i, epoch in enumerate(range(pos, pos + self.win_step)):
             # annotate with condition labels
@@ -317,12 +280,11 @@ class Visualizer:
                     zorder=-10,
                 )
 
-
     def plot_helper_lines(self):
-        '''
+        """
         Helper function to plot all the vertical lines to denote trial start, etc
         (Aesthetics)
-        '''
+        """
         self.ax.vlines(
             np.arange(self.epoch_len, self.epoch_len * self.win_step, self.epoch_len),
             -1,
@@ -364,58 +326,57 @@ class Visualizer:
         )  # end of delay
 
     def plot_pos(self, pos):
-        '''
+        """
         Primary plotting function:
 
         Args:
             pos: int, the position of the slider
-        '''
+        """
 
         self.plot_helper_lines()
         self.rej_reasons_on = False
 
         if self.stack:
-            self.plot_channels(self.epochs_stacked,pos)
+            self.plot_channels(self.epochs_stacked, pos)
             self.ax.set_ylim(*self.ylim_stacked)
-            self.ax.set_yticks([y*-1 for y in self.offset_dict_stacked.values()], self.offset_dict_stacked.keys())
+            self.ax.set_yticks([y * -1 for y in self.offset_dict_stacked.values()], self.offset_dict_stacked.keys())
 
         else:
-            self.plot_channels(self.epochs_pre,pos)
+            self.plot_channels(self.epochs_pre, pos)
             self.ax.set_ylim(*self.ylim)
             self.ax.set_yticks(self.ys, self.chan_labels)
 
-
-
-
         self.ax.set_xlim(*self.xlim)
-
-
-        
 
         # self.ax.set_xticks(np.arange(0,self.epoch_len,0.1 *0 1000/self.srate),np.tile(np.arange(self.trial_start,self.trial_end,0.1),self.win_step))
         # self.ax.tick_params(bottom=False,labelbottom=False)
         # Plot time labels
 
-
         if self.rejection_time[0] == self.trial_start and self.rejection_time[1] == self.trial_end:
             pass
         elif self.rejection_time[0] == self.trial_start:
-            self.ax.set_xticks(np.arange(
-                                (self.rejection_time[1] - self.trial_start) * self.srate,
-                                self.epoch_len * self.win_step,
-                                self.epoch_len))
+            self.ax.set_xticks(
+                np.arange(
+                    (self.rejection_time[1] - self.trial_start) * self.srate,
+                    self.epoch_len * self.win_step,
+                    self.epoch_len,
+                )
+            )
             self.ax.set_xticklabels([int(self.rejection_time[1] * 1000)] * self.win_step)
 
         elif self.rejection_time[1] == self.trial_end:
-            self.ax.set_xticks(np.arange(
+            self.ax.set_xticks(
+                np.arange(
                     (self.rejection_time[0] - self.trial_start) * self.srate,
                     self.epoch_len * self.win_step,
-                    self.epoch_len))
+                    self.epoch_len,
+                )
+            )
             self.ax.set_xticklabels([int(self.rejection_time[0] * 1000)] * self.win_step)
 
-
         else:
-            self.ax.set_xticks(sorted(
+            self.ax.set_xticks(
+                sorted(
                     np.concatenate(
                         (
                             np.arange(
@@ -430,15 +391,11 @@ class Visualizer:
                             ),
                         )
                     )
-                ))
-            self.ax.set_xticklabels([int(self.rejection_time[0] * self.srate),int(self.rejection_time[1] * 1000)] * self.win_step)
-
-
-
-
-
-
-
+                )
+            )
+            self.ax.set_xticklabels(
+                [int(self.rejection_time[0] * self.srate), int(self.rejection_time[1] * 1000)] * self.win_step
+            )
 
     def rejection_reasons(self, force_show=False):
         """
@@ -540,9 +497,7 @@ class Visualizer:
         if ev.button is MouseButton.LEFT and ev.xdata is not None:
             pos = self.slider.val
 
-            epoch_index = np.arange(pos, pos + self.win_step)[
-                int(ev.xdata // self.epoch_len)
-            ]
+            epoch_index = np.arange(pos, pos + self.win_step)[int(ev.xdata // self.epoch_len)]
             self.rej_manual[epoch_index] = not self.rej_manual[epoch_index]
             self.update(force=True)
 
