@@ -10,28 +10,28 @@ import shutil
 from pathlib import Path
 
 
-
 FILTER_FREQS = (0, 80)  # low, high
+
 
 class Preprocess:
     def __init__(
-        self,                   
-        data_dir: str,                  # where you keep datasets
-        root_dir: str,                  # location of RAW data
-        trial_start: float,             # start of trial (ms)
-        trial_end: float,               # end of trial (ms)
-        stim_conditions: list,          # valid condition labels   
-        timelock_ix: int,               # which position to timelock to (in event_code_dict)
-        event_dict: dict,               # event name: code mapping
-        event_code_dict: dict,          # event code: sequence mapping
-        filter_freqs=FILTER_FREQS,      # frequencies for bandpass filtering
-        srate: int = None,              # data sampling rate (Hz)
-        no_et_spaces: bool = True,      # are there spaces in the eyetracking file?
-        event_names: dict = None,       # names of each annotation
-        baseline_time=None,             # times for baselining
-        rejection_time=(None, None),    # times to do rejection
-        drop_channels=None,             # channels to drop outright (not recommendedd)
-        experiment_name=None,           # name of your experiment
+        self,
+        data_dir: str,  # where you keep datasets
+        root_dir: str,  # location of RAW data
+        trial_start: float,  # start of trial (ms)
+        trial_end: float,  # end of trial (ms)
+        stim_conditions: list,  # valid condition labels
+        timelock_ix: int,  # which position to timelock to (in event_code_dict)
+        event_dict: dict,  # event name: code mapping
+        event_code_dict: dict,  # event code: sequence mapping
+        filter_freqs=FILTER_FREQS,  # frequencies for bandpass filtering
+        srate: int = None,  # data sampling rate (Hz)
+        no_et_spaces: bool = True,  # are there spaces in the eyetracking file?
+        event_names: dict = None,  # names of each annotation
+        baseline_time=None,  # times for baselining
+        rejection_time=(None, None),  # times to do rejection
+        drop_channels=None,  # channels to drop outright (not recommendedd)
+        experiment_name=None,  # name of your experiment
     ):
 
         self.data_dir = data_dir
@@ -43,7 +43,7 @@ class Preprocess:
         self.stim_conditions = stim_conditions
         self.event_code_dict = event_code_dict
         self.event_names = event_names if event_names is not None else event_dict
-        self.event_names.update( # these occasionally appear
+        self.event_names.update(  # these occasionally appear
             {
                 "New Segment/": 99999,
                 "New Segment/LostSamples: 2": 10001,
@@ -118,14 +118,18 @@ class Preprocess:
         self.event_names.update(boundaries)
 
         # drop artifactual extra conditions
-        events_to_keep = np.isin(events[:,2],list(self.event_names.values()))
+        events_to_keep = np.isin(events[:, 2], list(self.event_names.values()))
         if any(~events_to_keep):
-            uq_events,counts = np.unique(events[~events_to_keep,2],return_counts=True)
-            print(f"WARNING: Dropping {np.sum(counts)} events that are not in the event list:" +
-                  '\n'.join([f"{uq_events[i]} ({counts[i]})" for i in range(len(uq_events))]))
+            uq_events, counts = np.unique(
+                events[~events_to_keep, 2], return_counts=True
+            )
+            print(
+                f"WARNING: Dropping {np.sum(counts)} events that are not in the event list:"
+                + "\n".join(
+                    [f"{uq_events[i]} ({counts[i]})" for i in range(len(uq_events))]
+                )
+            )
         events = events[events_to_keep]
-
-
 
         eegdata.set_annotations(None)
 
@@ -151,7 +155,9 @@ class Preprocess:
         # update sidecar with base values
         bids_path.update(extension=".json")
 
-        with open(Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_eeg.json")) as f:
+        with open(
+            Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_eeg.json")
+        ) as f:
             sidecar_base = json.load(f)
 
         mne_bids.update_sidecar_json(bids_path, sidecar_base)
@@ -164,7 +170,6 @@ class Preprocess:
         return eegdata, events
 
     def import_behavior(self, subject_number):
-
         """
         Imports behavioral data into a BIDS-compatible TSV
         """
@@ -211,28 +216,66 @@ class Preprocess:
 
         asc_file = glob("*.asc", root_dir=subject_dir)
         if len(asc_file) == 0:
-            raise FileNotFoundError("You need to convert the edf file to asc first")
+            raise FileNotFoundError(
+                "No .asc file. Are you sure you remembered to convert it?"
+            )
             # TODO: automatically convert edf files
-        if len(asc_file) > 1:
-            raise RuntimeError("More than 1 asc file present in subject directory")
-        asc_file = os.path.join(subject_dir, asc_file[0])
 
-        if self.no_et_spaces:
-            shutil.copy2(asc_file, path.fpath)
-        else:
-            self.remove_eyetrack_spaces(asc_file, path.fpath)
+        if len(asc_file) == 1:
+            asc_file = os.path.join(subject_dir, asc_file[0])
 
-        # load in eye tracker data
-        eye = mne.io.read_raw_eyelink(
-            path.fpath, create_annotations=["blinks", "messages"]
-        )
+            if self.no_et_spaces:
+                shutil.copy2(asc_file, path.fpath)
+            else:
+                self.remove_eyetrack_spaces(asc_file, path.fpath)
+
+            # load in eye tracker data
+            eye = mne.io.read_raw_eyelink(
+                path.fpath, create_annotations=["blinks", "messages"]
+            )
+
+        else:  # more than one asc
+            print(
+                "More than 1 asc file present in subject directory. They will be concatenated in alphabetical order"
+            )
+            raws = []
+            for ifile, file in enumerate(asc_file):
+                file = os.path.join(subject_dir, file)
+
+                ascpath = path.copy().update(split=ifile + 1)
+
+                if self.no_et_spaces:
+                    shutil.copy2(file, ascpath.fpath)
+                else:
+                    self.remove_eyetrack_spaces(file, ascpath.fpath)
+
+                try:
+                    raws.append(
+                        mne.io.read_raw_eyelink(
+                            ascpath.fpath, create_annotations=["blinks", "messages"]
+                        )
+                    )
+                except ValueError as e:
+                    print(
+                        f"Error reading {ascpath.fpath}. This may be due to a bug in mne if your eyetracking file"
+                        + "contains dropouts where the eye is lost. To fix this, manually re-generate the as files"
+                        + "with 'Block Flags Output' checked"
+                    )
+                    raise e
+            eye = mne.concatenate_raws(raws)
+
         keyword = "" if keyword is None else keyword
         regexp = f"^{keyword}(?![Bb][Aa][Dd]|[Ee][Dd][Gg][Ee]).*$"
         et_events, et_event_dict = mne.events_from_annotations(eye, regexp=regexp)
 
         # save sidecar
         path.update(extension=".json")
-        shutil.copy(Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_eyetracking.json"), path.fpath)
+        shutil.copy(
+            Path(__file__).parent.joinpath(
+                "../base_bids_files/TEMPLATE_eyetracking.json"
+            ),
+            path.fpath,
+        )
         print(
             "WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF"
         )  # option? automatically open this?
@@ -266,7 +309,10 @@ class Preprocess:
 
         # sidecar events
         path.update(extension=".json")
-        shutil.copy(Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_events.json"), path.fpath)
+        shutil.copy(
+            Path(__file__).parent.joinpath("../base_bids_files/TEMPLATE_events.json"),
+            path.fpath,
+        )
         print(
             "WARNING: YOU WILL HAVE TO MODIFY THE SIDECAR FILE YOURSELF"
         )  # option? automatically open this?
@@ -280,8 +326,60 @@ class Preprocess:
         """
         return events[["sample", "duration", "value"]].to_numpy().astype(int)
 
+    def make_eeg_epochs(self, eeg, eeg_events, eeg_trials_drop=None):
+        """
+        Function that handles epoching for EEG data. A replacement for make_and_sync_epochs when you don't want eyetracking
+
+        Args:
+            eeg: mne raw object containing EEG data
+            eeg_events: events structure containing condition codes. These should match the eyetracking conditions
+            eeg_trials_drop: trials to drop from EEG
+
+        Returns:
+            epochs: mne epochs object containing data
+        """
+
+        if eeg_trials_drop is None:
+            eeg_trials_drop = []
+        if self.srate is None:
+            self.srate = eeg.info["sfreq"]
+
+        # convert event dataframe to mne format (array of sample, duration, value)
+        eeg_events = self.convert_bids_events(eeg_events)
+        eeg_events = self.filter_events(eeg_events)
+
+        # get EEG epochs object
+        assert eeg.info["sfreq"] % self.srate == 0
+        decim = eeg.info["sfreq"] / self.srate
+
+        epochs = mne.Epochs(
+            eeg,
+            eeg_events,
+            self.event_dict,
+            tmin=self.trial_start_t,
+            tmax=self.trial_end_t,
+            on_missing="ignore",
+            baseline=self.baseline_time,
+            reject_tmin=self.rejection_time[0],
+            reject_tmax=self.rejection_time[1],
+            preload=True,
+            decim=decim,
+        ).drop(
+            eeg_trials_drop
+        )  # set up epochs object
+        if self.drop_channels is not None:
+            eeg_epochs = eeg_epochs.drop_channels(self.drop_channels)
+
+        return epochs
+
     def make_and_sync_epochs(
-        self, eeg, eeg_events, eye, eye_events, eeg_trials_drop=[], eye_trials_drop=[]
+        self,
+        eeg,
+        eeg_events,
+        eye,
+        eye_events,
+        eeg_trials_drop=None,
+        eye_trials_drop=None,
     ):
         """
         Function that does basic epoching
@@ -294,11 +392,15 @@ class Preprocess:
             eye_events: events structure containing condition codes. These should match the EEG conditions
             eeg_trials_drop: trials to drop from EEG
             eye_trials_drop: trials to drop from eyetracking
-        
+
         Returns:
             epochs: mne epochs object containing combined data
 
         """
+        if eeg_trials_drop is None:
+            eeg_trials_drop = []
+        if eye_trials_drop is None:
+            eye_trials_drop = []
         if self.srate is None:
             self.srate = eeg.info["sfreq"]
 
@@ -306,9 +408,8 @@ class Preprocess:
         unmatched_codes = list(
             set(eeg_events["value"].unique()) ^ set(eye_events["value"].unique())
         )
-        eeg_events = self.convert_bids_events(
-            eeg_events
-        )  # convert event dataframe to mne format (array of sample, duration, value)
+        # convert event dataframe to mne format (array of sample, duration, value)
+        eeg_events = self.convert_bids_events(eeg_events)
         eye_events = self.convert_bids_events(eye_events)
         eeg_events = eeg_events[~np.isin(eeg_events, unmatched_codes).any(axis=1)]
         eye_events = eye_events[~np.isin(eye_events, unmatched_codes).any(axis=1)]
@@ -353,8 +454,8 @@ class Preprocess:
             preload=True,
             decim=decim,
         ).drop(eye_trials_drop)
-        
-        if 'DIN' in eye_epochs.info['ch_names']:
+
+        if "DIN" in eye_epochs.info["ch_names"]:
             eye_epochs.drop_channels(["DIN"])
 
         if len(eye_epochs) != len(
@@ -399,7 +500,7 @@ class Preprocess:
         with open(input_file, "r") as f:
             lines = f.readlines()
         newlines = np.array(lines)[
-            [l != "\n" and "ESACC" not in l for l in lines]
+            [l != "\n" and "ESACC" not in l and "EFIX" not in l for l in lines]
         ]  # it breaks with empty lines or saccades, so delete these
         with open(output_file, "w") as f:
             f.writelines(newlines)
@@ -452,6 +553,13 @@ class Preprocess:
             np.floor(dur * epochs.info["sfreq"] / 1000)
         )  # convert ms to timepoints
 
+    def artreject_nan(self, epochs):
+        """
+        Rejects trials that contain any nan values
+        """
+        eegdata = self.get_data_from_rej_period(epochs)
+        return np.any(np.isnan(eegdata), 2)
+
     def artreject_slidingP2P(self, epochs, rejection_criteria, win=200, win_step=100):
         """
         Runs artifact rejection baased on a sliding window
@@ -483,8 +591,8 @@ class Preprocess:
             chans = chan_types == chan_type
             threshold = rejection_criteria[chan_type]
             for st in win_starts:
-                data_min = eegdata[:, chans, st : st + win].min(axis=2)
-                data_max = eegdata[:, chans, st : st + win].max(axis=2)
+                data_min = np.nanmin(eegdata[:, chans, st : st + win], axis=2)
+                data_max = np.nanmax(eegdata[:, chans, st : st + win], axis=2)
                 rej_chans[:, chans] = np.logical_or(
                     rej_chans[:, chans], (data_max - data_min) > threshold
                 )
@@ -512,8 +620,8 @@ class Preprocess:
             chans = chan_types == chan_type
             threshold = rejection_criteria[chan_type]
 
-            data_min = eegdata[:, chans].min(axis=2)
-            data_max = eegdata[:, chans].max(axis=2)
+            data_min = np.nanmin(eegdata[:, chans], axis=2)
+            data_max = np.nanmax(eegdata[:, chans], axis=2)
             rej_chans[:, chans] = np.logical_or(
                 data_max > threshold, data_min < -1 * threshold
             )
@@ -548,8 +656,10 @@ class Preprocess:
             threshold = rejection_criteria[chan_type]
             for st in win_starts:
 
-                first_half = eegdata[:, chans, st : st + win // 2].mean(axis=2)
-                last_half = eegdata[:, chans, st + win // 2 : st + win].mean(axis=2)
+                first_half = np.nanmean(eegdata[:, chans, st : st + win // 2], axis=2)
+                last_half = np.nanmean(
+                    eegdata[:, chans, st + win // 2 : st + win], axis=2
+                )
                 rej_chans[:, chans] = np.logical_or(
                     rej_chans[:, chans], np.abs(first_half - last_half) > threshold
                 )
@@ -597,7 +707,7 @@ class Preprocess:
         rej_linear = np.logical_and(r2s > min_r2, slopes > min_slope)
         return rej_linear
 
-    def artreject_flatline(self, epochs, rejection_criteria, flatline_duration):
+    def artreject_flatline(self, epochs, rejection_criteria, flatline_duration=200):
         """
         Rejects channels with flatline behavior (more than [flatline_duration] ms of the same value)
         You should probably only run this on EEG channels...
@@ -783,4 +893,3 @@ class Preprocess:
         pd.DataFrame(rej_reasons, columns=epochs.info["ch_names"]).to_csv(
             path.fpath, sep="\t", index=False
         )
-
