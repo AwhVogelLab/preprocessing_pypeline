@@ -4,7 +4,6 @@ import mne_bids
 import os
 from glob import glob
 import pandas as pd
-import re
 import json
 import shutil
 from pathlib import Path
@@ -468,8 +467,6 @@ class Preprocess:
         if np.all(
             [eye_chan in chan_labels for eye_chan in ["xpos_right", "xpos_left", "ypos_right", "ypos_left"]]
         ):  # TODO: triple check this works
-            # x_chans = chan_labels[[len(re.findall('xpos',c)) > 0 for c in chan_labels]]
-            # y_chans = chan_labels[[len(re.findall('ypos',c)) > 0 for c in chan_labels]]
             x_chans = chan_labels[["xpos" in c for c in chan_labels]]
             y_chans = chan_labels[["ypos" in c for c in chan_labels]]
 

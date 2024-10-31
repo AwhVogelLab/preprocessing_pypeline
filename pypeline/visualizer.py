@@ -2,14 +2,11 @@ import numpy as np
 import mne
 import mne_bids
 import os
-from glob import glob
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 from matplotlib.backend_bases import MouseButton
 from matplotlib.text import Annotation
 import pandas as pd
-import re
-from pathlib import Path
 
 
 # FOR PLOTTING
