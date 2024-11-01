@@ -333,7 +333,7 @@ class Preprocess:
             eeg_trials_drop
         )  # set up epochs object
         if self.drop_channels is not None:
-            eeg_epochs = eeg_epochs.drop_channels(self.drop_channels)
+            epochs = epochs.drop_channels(self.drop_channels)
 
         return epochs
 

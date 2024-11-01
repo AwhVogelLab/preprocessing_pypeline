@@ -167,10 +167,16 @@ class Visualizer:
 
         self.offset_dict_stacked = {
             "eeg": -self.ys[self.chan_types == "eeg"][-3],  # last 3rd EEG position
-            "eog": -self.ys[self.chan_types == "eog"].mean(),  # average of all EOG y positions
-            "eyegaze_x": -self.ys[self.chan_types == "eyegaze"][0],  # TOP of eye gaze
-            "eyegaze_y": -self.ys[self.chan_types == "eyegaze"][-1],  # BOTTOM of eye gaze
         }
+        if np.sum(self.chan_types == "eog") > 0:
+            self.offset_dict_stacked["eog"] = -self.ys[
+                self.chan_types == "eog"
+            ].mean()  # average of all EOG y positions
+        if np.sum(self.chan_types == "eyegaze") > 0:
+            self.offset_dict_stacked["eyegaze_x"] = -self.ys[self.chan_types == "eyegaze"][0]  # TOP of eye gaze
+            self.offset_dict_stacked["eyegaze_y"] = -self.ys[self.chan_types == "eyegaze"][-1]  # BOTTOM of eye gaze
+        if np.sum(self.chan_types == "misc") > 0:
+            self.offset_dict_stacked["misc"] = -self.ys[self.chan_types == "misc"][-1]
 
         self.epochs_stacked = np.full(epochs_raw.shape, np.nan)
         self.ys_stacked = []
