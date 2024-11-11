@@ -32,6 +32,7 @@ class Visualizer:
         chan_offset=CHAN_OFFSET,
         channels_drop=None,
         channels_ignore=None,
+        load_flags=True,
     ):
         self.sub = sub
         self.parent_dir = parent_dir
@@ -93,7 +94,12 @@ class Visualizer:
             self.rej_chans[:, self.ignored_channels_mask] = False
             self.rej_reasons[:, self.ignored_channels_mask] = None
 
-        self.rej_manual = self.rej_chans.any(1)
+        if load_flags:
+            self.data_path.update(suffix="rejection_flags", extension=".npy")
+            print("You have saved annotations already. Loading these.")
+            self.rej_manual = np.load(self.data_path.fpath)
+        else:
+            self.rej_manual = self.rej_chans.any(1)
 
         self.info = self.epochs_obj.info
         self.chan_types = self.info.get_channel_types()
