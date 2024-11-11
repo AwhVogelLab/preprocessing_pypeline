@@ -1,3 +1,4 @@
+import mne_bids.read
 import numpy as np
 import mne
 import mne_bids
@@ -70,15 +71,31 @@ class Preprocess:
         function to import raw eeg data and convert it to a bids object
 
         Args:
-            root_data_dir: parent directory of all subjects
             subject_number: the subject number (data should be in a folder with this name)
+            overwrite (bool): if the data already exists, should it be just read from disc (false) or rewritten (true)
         Returns:
             bids object (saved from raw EEG)
             mne-python raw dataset
             events array (as a dataframe)
-
-
         """
+
+        if not overwrite:
+            try:
+                bids_path = mne_bids.BIDSPath(
+                    subject=subject_number,
+                    task=self.experiment_name,
+                    root=self.data_dir,
+                    datatype="eeg",
+                    suffix="eeg",
+                    extension=".vhdr",
+                )
+
+                eegdata = mne_bids.read_raw_bids(bids_path)
+                events = pd.read_csv(bids_path.copy().update(suffix="events", extension=".tsv").fpath, sep="\t")
+
+                return eegdata, events
+            except FileNotFoundError:
+                print("Could not find EEG data in your directory. I will try to import it from the raw data")
 
         subject_dir = os.path.join(self.root_dir, subject_number)
         vhdr_file = sorted(glob("*.vhdr", root_dir=subject_dir))
@@ -122,14 +139,6 @@ class Preprocess:
 
         eegdata.set_annotations(None)
 
-        bids_path = mne_bids.BIDSPath(
-            subject=subject_number,
-            task=self.experiment_name,
-            root=self.data_dir,
-            datatype="eeg",
-            suffix="eeg",
-            extension=".vhdr",
-        )
         mne_bids.write_raw_bids(
             eegdata,
             bids_path,
@@ -149,7 +158,6 @@ class Preprocess:
 
         mne_bids.update_sidecar_json(bids_path, sidecar_base)
 
-        # events,_ = mne.events_from_annotations(eegdata)
         events = pd.read_csv(bids_path.copy().update(suffix="events", extension=".tsv").fpath, sep="\t")
 
         return eegdata, events
@@ -171,13 +179,15 @@ class Preprocess:
             if "beh" in f:
                 pd.read_csv(f).to_csv(path.fpath, sep="\t")
 
-    def import_eyetracker(self, subject_number, keyword=None):
+    def import_eyetracker(self, subject_number, keyword=None, overwrite=False):
         """Loads in eyetracking data for a subject
 
         Args:
             subject_dir (str): directory where subject's data is found. Should contain ONE .asc file.
             It will be automatically converted if necessary
             keyword (str, default none): the keyword you use before sync codes
+            overwrite (bool): if the data already exists, should it be just read from disc (false) or rewritten (true)
+
 
 
         Returns:
@@ -195,6 +205,36 @@ class Preprocess:
             extension=".asc",
             check=False,
         )
+
+        if not overwrite:
+            try:
+                asc_file = glob("*.asc", root_dir=path.fpath.parent)
+                if len(asc_file) == 0:
+                    raise FileNotFoundError("No .asc file. I will try to re-import the data")
+                elif len(asc_file) == 1:
+                    asc_file = os.path.join(subject_dir, asc_file[0])
+                    eye = mne.io.read_raw_eyelink(asc_file, create_annotations=["blinks", "messages"])
+
+                else:
+                    print(
+                        "More than 1 asc file present in subject directory. They will be concatenated in alphabetical order"
+                    )
+                    raws = []
+                    for ifile, file in enumerate(asc_file):
+                        file = os.path.join(subject_dir, file)
+                        ascpath = path.copy().update(split=ifile + 1)
+                        raws.append(mne.io.read_raw_eyelink(file, create_annotations=["blinks", "messages"]))
+                    eye = mne.concatenate_raws(raws)
+
+                # events should be already saved regardless
+                path.update(suffix="events", extension=".tsv")
+                eye_events = pd.read_csv(path.fpath, sep="\t", index=False)
+
+                return eye, eye_events
+
+            except FileNotFoundError:
+                print("Could not find EEG data in your directory. I will try to import it from the raw data")
+
         path.mkdir()
 
         # COPY MAIN ASC FILE (with spaces removed)
@@ -441,8 +481,6 @@ class Preprocess:
             print(f"EEG has {len(eeg_epochs.info.ch_names)} channels and {len(eeg_epochs)} trials")
             print(f"Eyetracking has {len(eye_epochs.info.ch_names)} channels and {len(eye_epochs)} trials")
             raise e
-
-        # there is some code here that runs selections. What does this do??
 
         return epochs
 
