@@ -62,16 +62,19 @@ class Visualizer:
 
         self.data_path.update(suffix="events", extension=".tsv")
 
-        self.conditions = pd.read_csv(self.data_path.fpath, sep="\t")["trial_type"]
+        self.events = pd.read_csv(self.data_path.fpath, sep="\t")
+        ## EEG Port codes
+        self.all_port_codes = pd.read_csv(
+            self.data_path.copy()
+            .update(root=self.data_path.root.parent, description=None, suffix="events", extension="tsv")
+            .fpath,
+            sep="\t",
+        )
 
         self.data_path.update(suffix="artifacts", extension=".tsv")
         rej = pd.read_csv(self.data_path.fpath, sep="\t", keep_default_na=False)
         self.rej_chans = rej.apply(np.vectorize(lambda x: len(x) > 0)).to_numpy()
         self.rej_reasons = rej.to_numpy()
-
-        # self.conditions = np.load(os.path.join(parent_dir, sub, f"{sub}_conditions.npy"))
-        # self.rej_chans = np.load(os.path.join(parent_dir, sub, f"{sub}_rej.npy"))
-        # self.rej_reasons = np.load(os.path.join(parent_dir, sub, f"{sub}_rej_reasons.npy"), allow_pickle=True)
 
         if channels_drop is not None:
             channels_drop = [ch for ch in channels_drop if ch in self.epochs_obj.ch_names]
@@ -96,8 +99,12 @@ class Visualizer:
 
         if load_flags:
             self.data_path.update(suffix="rejection_flags", extension=".npy")
-            print("You have saved annotations already. Loading these.")
-            self.rej_manual = np.load(self.data_path.fpath)
+            try:
+                self.rej_manual = np.load(self.data_path.fpath)
+                print("You have saved annotations already. Loading these.")
+            except FileNotFoundError:
+                print("No saved annotations found, resetting to default.")
+                self.rej_manual = self.rej_chans.any(1)
         else:
             self.rej_manual = self.rej_chans.any(1)
 
@@ -231,6 +238,7 @@ class Visualizer:
             + "[ and ]: Change window size \n"
             + "+ and -: Change channel scale \n"
             + "r: Show rejection reasons \n"
+            + "p: Show port codes \n"
             + "c: Stack channels \n"
             + "w: Save annotations \n",
             horizontalalignment="center",
@@ -265,7 +273,7 @@ class Visualizer:
             # annotate with condition labels
 
             self.ax.annotate(
-                f"Trial {epoch}\n{self.conditions[epoch]}",
+                f"Trial {epoch}\n{self.events['trial_type'][epoch]}",
                 (
                     i * self.epoch_len + self.epoch_len / 2,
                     self.ylim[1] + 1.05 * CHAN_OFFSET,
@@ -429,11 +437,23 @@ class Visualizer:
 
         else:
 
-            for child in self.ax.get_children():
-                if isinstance(child, Annotation) and "(R)" in child.get_text():
-                    child.remove()
+            self._hide_annotation("(R)")
             self.rej_reasons_on = False
         self.fig.canvas.draw_idle()
+
+    def _hide_annotation(self, text):
+        """
+        Helper function to hide annotations with a specific text in them
+        """
+
+        for child in self.ax.get_children():
+            if isinstance(child, Annotation) and text in child.get_text():
+                child.remove()
+
+    def show_port_codes(self, show=True):
+        """
+        Function to show port codes
+        """
 
     def update(self, force=False):
         pos = self.slider.val
@@ -490,6 +510,9 @@ class Visualizer:
 
             case "r":
                 self.rejection_reasons()
+
+            case "p":
+                self.show_port_codes()
 
             case "c":
                 self.stack = not self.stack
