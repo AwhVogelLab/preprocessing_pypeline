@@ -57,33 +57,56 @@ class Visualizer:
             check=False,
         )
 
-        self.data_path.update(suffix="eeg", extension=".fif")
+        self.data_path.update(suffix="eeg", extension=".fif")  # load in preprocessed data
         self.epochs_obj = mne.read_epochs(self.data_path.fpath)
 
-        self.data_path.update(suffix="events", extension=".tsv")
+        self.data_path.update(suffix="events", extension=".tsv")  # load in events
 
         self.events = pd.read_csv(self.data_path.fpath, sep="\t")
         ## EEG Port codes
-        self.all_port_codes = pd.read_csv(
+        all_port_codes = pd.read_csv(
             self.data_path.copy()
             .update(root=self.data_path.root.parent, description=None, suffix="events", extension="tsv")
             .fpath,
             sep="\t",
         )
 
-        self.data_path.update(suffix="artifacts", extension=".tsv")
+        # re-index port code timings for each trial
+
+        self.all_codes = []
+        self.all_times = []
+
+        for _, row in self.events.iterrows():
+            trial_sample = row["sample"]
+            trial_codes = all_port_codes[
+                (all_port_codes["sample"] > trial_sample + self.trial_start * 1000)
+                & (all_port_codes["sample"] < trial_sample + self.trial_end * 1000)
+            ]
+            # get codes which occured in a (trial_start, trial_end) sample around each trial's timelock event
+            code_times = np.array(trial_codes["sample"])
+            code_times -= trial_sample
+            code_times -= int(self.trial_start * 1000)
+            self.all_codes.append(trial_codes["value"].tolist())
+            self.all_times.append(code_times.tolist())
+
+        if len(self.all_codes) != len(self.events):
+            raise RuntimeError(
+                f"Error: could not find port codes for all trials. There are {len(self.events)} trials and {len(self)} sets of codes at corresponding times"
+            )
+
+        self.data_path.update(suffix="artifacts", extension=".tsv")  # load in artifacts and apply to channels
         rej = pd.read_csv(self.data_path.fpath, sep="\t", keep_default_na=False)
         self.rej_chans = rej.apply(np.vectorize(lambda x: len(x) > 0)).to_numpy()
         self.rej_reasons = rej.to_numpy()
 
-        if channels_drop is not None:
+        if channels_drop is not None:  # drop ignored channels
             channels_drop = [ch for ch in channels_drop if ch in self.epochs_obj.ch_names]
             if len(channels_drop) > 0:
                 self.rej_chans = self.rej_chans[:, ~np.in1d(self.epochs_obj.ch_names, channels_drop)]
                 self.rej_reasons = self.rej_reasons[:, ~np.in1d(self.epochs_obj.ch_names, channels_drop)]
                 self.epochs_obj.drop_channels(channels_drop)
 
-        self.channels_ignore = channels_ignore
+        self.channels_ignore = channels_ignore  # make a mask for channels we ignore
         self.ignored_channels_mask = np.in1d(self.epochs_obj.ch_names, channels_ignore)
 
         if self.rej_chans.shape[1] != self.ignored_channels_mask.shape[0]:
@@ -93,11 +116,11 @@ class Visualizer:
                              Please make sure that any channels without artifact labels are dropped"
             )
 
-        if channels_ignore is not None:
+        if channels_ignore is not None:  # never reject ignored channels (eg EOG)
             self.rej_chans[:, self.ignored_channels_mask] = False
             self.rej_reasons[:, self.ignored_channels_mask] = None
 
-        if load_flags:
+        if load_flags:  # manually load any previously saved rejection flags
             self.data_path.update(suffix="rejection_flags", extension=".npy")
             try:
                 self.rej_manual = np.load(self.data_path.fpath)
@@ -111,7 +134,7 @@ class Visualizer:
         self.info = self.epochs_obj.info
         self.chan_types = self.info.get_channel_types()
 
-        self.chan_order = np.concatenate(
+        self.chan_order = np.concatenate(  # reorder channels in order EEG / EOG / eyetracking / other
             (
                 mne.pick_types(self.info, eeg=True),
                 mne.pick_types(self.info, eog=True),
