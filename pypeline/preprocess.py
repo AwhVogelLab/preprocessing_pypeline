@@ -79,17 +79,17 @@ class Preprocess:
             events array (as a dataframe)
         """
 
+        bids_path = mne_bids.BIDSPath(
+            subject=subject_number,
+            task=self.experiment_name,
+            root=self.data_dir,
+            datatype="eeg",
+            suffix="eeg",
+            extension=".vhdr",
+        )
+
         if not overwrite:
             try:
-                bids_path = mne_bids.BIDSPath(
-                    subject=subject_number,
-                    task=self.experiment_name,
-                    root=self.data_dir,
-                    datatype="eeg",
-                    suffix="eeg",
-                    extension=".vhdr",
-                )
-
                 eegdata = mne_bids.read_raw_bids(bids_path)
                 events = pd.read_csv(bids_path.copy().update(suffix="events", extension=".tsv").fpath, sep="\t")
 

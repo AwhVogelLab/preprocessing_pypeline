@@ -106,20 +106,6 @@ class Visualizer:
                 self.rej_reasons = self.rej_reasons[:, ~np.in1d(self.epochs_obj.ch_names, channels_drop)]
                 self.epochs_obj.drop_channels(channels_drop)
 
-        self.channels_ignore = channels_ignore  # make a mask for channels we ignore
-        self.ignored_channels_mask = np.in1d(self.epochs_obj.ch_names, channels_ignore)
-
-        if self.rej_chans.shape[1] != self.ignored_channels_mask.shape[0]:
-            raise ValueError(
-                f"There are {self.rej_chans.shape[1]} channels in the rejection labels,\
-                             but {self.ignored_channels_mask.shape[0]} channels in the data. \
-                             Please make sure that any channels without artifact labels are dropped"
-            )
-
-        if channels_ignore is not None:  # never reject ignored channels (eg EOG)
-            self.rej_chans[:, self.ignored_channels_mask] = False
-            self.rej_reasons[:, self.ignored_channels_mask] = None
-
         if load_flags:  # manually load any previously saved rejection flags
             self.data_path.update(suffix="rejection_flags", extension=".npy")
             try:
@@ -147,6 +133,20 @@ class Visualizer:
         self.rej_chans = self.rej_chans[:, self.chan_order]
         self.chan_types = np.array(self.chan_types)[self.chan_order]
 
+        self.channels_ignore = channels_ignore  # make a mask for channels we ignore
+        self.ignored_channels_mask = np.in1d(self.chan_labels, channels_ignore)
+
+        if self.rej_chans.shape[1] != self.ignored_channels_mask.shape[0]:
+            raise ValueError(
+                f"There are {self.rej_chans.shape[1]} channels in the rejection labels,\
+                             but {self.ignored_channels_mask.shape[0]} channels in the data. \
+                             Please make sure that any channels without artifact labels are dropped"
+            )
+
+        if channels_ignore is not None:  # never reject ignored channels (eg EOG)
+            self.rej_chans[:, self.ignored_channels_mask] = False
+            self.rej_reasons[:, self.ignored_channels_mask] = None
+
         self.epochs_raw = self.epochs_obj.get_data(copy=True)
         self.epochs_pre = None  # initialized when we preprocess
 
@@ -159,7 +159,7 @@ class Visualizer:
         self.pos = 0
         self.extra_chan_scale = 1
 
-        self.rejection_reasons_on = False
+        self.rej_reasons_on = False
         self.port_codes_on = False
 
     def get_rejection_reason(self, trial):
@@ -242,6 +242,10 @@ class Visualizer:
         )
 
     def open_figure(self, color="white"):
+
+        self.rej_reasons_on = False
+        self.port_codes_on = False
+
         self.stack = False
         self.fig, self.ax = plt.subplots()
         self.fig.canvas.manager.set_window_title(f"EEG Viewer - Subject {self.sub} (press H for help)")
