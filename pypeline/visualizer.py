@@ -159,6 +159,9 @@ class Visualizer:
         self.pos = 0
         self.extra_chan_scale = 1
 
+        self.rejection_reasons_on = False
+        self.port_codes_on = False
+
     def get_rejection_reason(self, trial):
         reasons = []
         for ch in np.where(self.rej_chans[trial])[1]:
@@ -374,7 +377,6 @@ class Visualizer:
         """
 
         self.plot_helper_lines()
-        self.rej_reasons_on = False
 
         if self.stack:
             self.plot_channels(self.epochs_stacked, pos)
@@ -437,41 +439,23 @@ class Visualizer:
                 [int(self.rejection_time[0] * self.srate), int(self.rejection_time[1] * 1000)] * self.win_step
             )
 
-    def rejection_reasons(self, force_show=False):
+    def show_rejection_reasons(self):
         """
         function to show and hide rejection reasons
         """
+        self.rej_annotations = []
 
-        # print(force_show)
+        for i in range(self.win_step):
+            trial = self.slider.val + i
 
-        if not self.rej_reasons_on:
-
-            for i in range(self.win_step):
-                trial = self.slider.val + i
-
-                for ch in np.where(self.rej_chans[trial])[0]:
-                    self.ax.annotate(
-                        f"{self.chan_labels[ch]}: {self.rej_reasons[trial,ch]} (R)",
-                        (i * self.epoch_len, self.ys[ch]),
-                        backgroundcolor="white",
-                        annotation_clip=False,
-                    )
-            self.rej_reasons_on = True
-
-        else:
-
-            self._hide_annotation("(R)")
-            self.rej_reasons_on = False
-        self.fig.canvas.draw_idle()
-
-    def _hide_annotation(self, text):
-        """
-        Helper function to hide annotations with a specific text in them
-        """
-
-        for child in self.ax.get_children():
-            if isinstance(child, Annotation) and text in child.get_text():
-                child.remove()
+            for ch in np.where(self.rej_chans[trial])[0]:
+                an = self.ax.annotate(
+                    f"{self.chan_labels[ch]}: {self.rej_reasons[trial,ch]} (R)",
+                    (i * self.epoch_len, self.ys[ch]),
+                    backgroundcolor="white",
+                    annotation_clip=False,
+                )
+                self.rej_annotations.append(an)
 
     def show_port_codes(self):
         """
@@ -486,12 +470,11 @@ class Visualizer:
             all_times.extend([t + i * self.epoch_len for t in times])
             all_codes.extend(self.all_codes[self.slider.val + i])
 
-        self.ax.vlines(all_times, *self.ylim, color="g")
+        self.code_lines = self.ax.vlines(all_times, *self.ylim, color="g")
 
         for code, time in zip(all_codes, all_times):
             an = self.ax.annotate(code, (time, self.ylim[1] + 5e-6), ha="center", annotation_clip=False)
             self.code_annotations.append(an)
-        self.fig.canvas.draw_idle()
 
     def update(self, force=False):
         pos = self.slider.val
@@ -504,6 +487,10 @@ class Visualizer:
         else:
             self.ax.clear()
             self.plot_pos(pos)
+            if self.rej_reasons_on:
+                self.show_rejection_reasons()
+            if self.port_codes_on:
+                self.show_port_codes()
             if force:
                 self.fig.canvas.draw_idle()
             else:
@@ -547,10 +534,28 @@ class Visualizer:
                 self.save_annotations()
 
             case "r":
-                self.rejection_reasons()
+                if self.rej_reasons_on:
+                    for an in self.rej_annotations:
+                        an.remove()
+                    self.rej_reasons_on = False
+                    self.fig.canvas.draw_idle()
+                else:
+                    self.show_rejection_reasons()
+                    self.rej_reasons_on = True
+                    self.fig.canvas.draw_idle()
 
             case "p":
-                self.show_port_codes()
+                if self.port_codes_on:
+                    for an in self.code_annotations:
+                        an.remove()
+                    self.code_lines.remove()
+                    self.port_codes_on = False
+
+                    self.fig.canvas.draw_idle()
+                else:
+                    self.port_codes_on = True
+                    self.show_port_codes()
+                    self.fig.canvas.draw_idle()
 
             case "c":
                 self.stack = not self.stack
