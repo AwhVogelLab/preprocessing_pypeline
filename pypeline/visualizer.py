@@ -32,6 +32,7 @@ class Visualizer:
         chan_offset=CHAN_OFFSET,
         channels_drop=None,
         channels_ignore=None,
+        load_flags=True,
     ):
         self.sub = sub
         self.parent_dir = parent_dir
@@ -56,31 +57,72 @@ class Visualizer:
             check=False,
         )
 
-        self.data_path.update(suffix="eeg", extension=".fif")
+        self.data_path.update(suffix="eeg", extension=".fif")  # load in preprocessed data
         self.epochs_obj = mne.read_epochs(self.data_path.fpath)
 
-        self.data_path.update(suffix="events", extension=".tsv")
+        self.data_path.update(suffix="events", extension=".tsv")  # load in events
 
-        self.conditions = pd.read_csv(self.data_path.fpath, sep="\t")["trial_type"]
+        self.events = pd.read_csv(self.data_path.fpath, sep="\t")
+        ## EEG Port codes
+        all_port_codes = pd.read_csv(
+            self.data_path.copy()
+            .update(root=self.data_path.root.parent, description=None, suffix="events", extension="tsv")
+            .fpath,
+            sep="\t",
+        )
 
-        self.data_path.update(suffix="artifacts", extension=".tsv")
+        # re-index port code timings for each trial
+
+        self.all_codes = []
+        self.all_times = []
+
+        for _, row in self.events.iterrows():
+            trial_sample = row["sample"]
+            trial_codes = all_port_codes[
+                (all_port_codes["sample"] > trial_sample + self.trial_start * 1000)
+                & (all_port_codes["sample"] < trial_sample + self.trial_end * 1000)
+            ]
+            # get codes which occured in a (trial_start, trial_end) sample around each trial's timelock event
+            code_times = np.array(trial_codes["sample"])
+            code_times -= trial_sample
+            code_times -= int(self.trial_start * 1000)
+            self.all_codes.append(trial_codes["value"].tolist())
+            self.all_times.append(code_times.tolist())
+
+        if len(self.all_codes) != len(self.events):
+            raise RuntimeError(
+                f"Error: could not find port codes for all trials. There are {len(self.events)} trials and {len(self)} sets of codes at corresponding times"
+            )
+
+        self.data_path.update(suffix="artifacts", extension=".tsv")  # load in artifacts and apply to channels
         rej = pd.read_csv(self.data_path.fpath, sep="\t", keep_default_na=False)
         self.rej_chans = rej.apply(np.vectorize(lambda x: len(x) > 0)).to_numpy()
         self.rej_reasons = rej.to_numpy()
 
-        # self.conditions = np.load(os.path.join(parent_dir, sub, f"{sub}_conditions.npy"))
-        # self.rej_chans = np.load(os.path.join(parent_dir, sub, f"{sub}_rej.npy"))
-        # self.rej_reasons = np.load(os.path.join(parent_dir, sub, f"{sub}_rej_reasons.npy"), allow_pickle=True)
-
-        if channels_drop is not None:
+        if channels_drop is not None:  # drop ignored channels
             channels_drop = [ch for ch in channels_drop if ch in self.epochs_obj.ch_names]
             if len(channels_drop) > 0:
                 self.rej_chans = self.rej_chans[:, ~np.in1d(self.epochs_obj.ch_names, channels_drop)]
                 self.rej_reasons = self.rej_reasons[:, ~np.in1d(self.epochs_obj.ch_names, channels_drop)]
                 self.epochs_obj.drop_channels(channels_drop)
 
-        self.channels_ignore = channels_ignore
-        self.ignored_channels_mask = np.in1d(self.epochs_obj.ch_names, channels_ignore)
+        if load_flags:  # manually load any previously saved rejection flags
+            self.data_path.update(suffix="rejection_flags", extension=".npy")
+            try:
+                self.rej_manual = np.load(self.data_path.fpath)
+                print("You have saved annotations already. Loading these.")
+            except FileNotFoundError:
+                print("No saved annotations found, resetting to default.")
+                self.rej_manual = self.rej_chans.any(1)
+        else:
+            self.rej_manual = self.rej_chans.any(1)
+
+        self.info = self.epochs_obj.info
+        self.chan_types = np.array(self.info.get_channel_types())
+        self.chan_labels = np.array(self.epochs_obj.ch_names)
+
+        self.channels_ignore = channels_ignore  # make a mask for channels we ignore
+        self.ignored_channels_mask = np.in1d(self.chan_labels, channels_ignore)
 
         if self.rej_chans.shape[1] != self.ignored_channels_mask.shape[0]:
             raise ValueError(
@@ -89,27 +131,9 @@ class Visualizer:
                              Please make sure that any channels without artifact labels are dropped"
             )
 
-        if channels_ignore is not None:
+        if channels_ignore is not None:  # never reject ignored channels (eg EOG)
             self.rej_chans[:, self.ignored_channels_mask] = False
             self.rej_reasons[:, self.ignored_channels_mask] = None
-
-        self.rej_manual = self.rej_chans.any(1)
-
-        self.info = self.epochs_obj.info
-        self.chan_types = self.info.get_channel_types()
-
-        self.chan_order = np.concatenate(
-            (
-                mne.pick_types(self.info, eeg=True),
-                mne.pick_types(self.info, eog=True),
-                mne.pick_types(self.info, eyetrack="eyegaze"),
-                mne.pick_types(self.info, misc=True),
-            )
-        )
-
-        self.chan_labels = np.array(self.epochs_obj.ch_names)[self.chan_order]
-        self.rej_chans = self.rej_chans[:, self.chan_order]
-        self.chan_types = np.array(self.chan_types)[self.chan_order]
 
         self.epochs_raw = self.epochs_obj.get_data(copy=True)
         self.epochs_pre = None  # initialized when we preprocess
@@ -122,6 +146,9 @@ class Visualizer:
 
         self.pos = 0
         self.extra_chan_scale = 1
+
+        self.rej_reasons_on = False
+        self.port_codes_on = False
 
     def get_rejection_reason(self, trial):
         reasons = []
@@ -144,8 +171,6 @@ class Visualizer:
         }  # must be in order and increasing
 
         epochs_raw = self.epochs_raw.copy()
-
-        epochs_raw = epochs_raw[:, self.chan_order]
 
         epochs_raw *= self.extra_chan_scale
 
@@ -203,6 +228,10 @@ class Visualizer:
         )
 
     def open_figure(self, color="white"):
+
+        self.rej_reasons_on = False
+        self.port_codes_on = False
+
         self.stack = False
         self.fig, self.ax = plt.subplots()
         self.fig.canvas.manager.set_window_title(f"EEG Viewer - Subject {self.sub} (press H for help)")
@@ -225,6 +254,7 @@ class Visualizer:
             + "[ and ]: Change window size \n"
             + "+ and -: Change channel scale \n"
             + "r: Show rejection reasons \n"
+            + "p: Show port codes \n"
             + "c: Stack channels \n"
             + "w: Save annotations \n",
             horizontalalignment="center",
@@ -259,7 +289,7 @@ class Visualizer:
             # annotate with condition labels
 
             self.ax.annotate(
-                f"Trial {epoch}\n{self.conditions[epoch]}",
+                f"Trial {epoch}\n{self.events['trial_type'][epoch]}",
                 (
                     i * self.epoch_len + self.epoch_len / 2,
                     self.ylim[1] + 1.05 * CHAN_OFFSET,
@@ -337,7 +367,6 @@ class Visualizer:
         """
 
         self.plot_helper_lines()
-        self.rej_reasons_on = False
 
         if self.stack:
             self.plot_channels(self.epochs_stacked, pos)
@@ -400,34 +429,42 @@ class Visualizer:
                 [int(self.rejection_time[0] * self.srate), int(self.rejection_time[1] * 1000)] * self.win_step
             )
 
-    def rejection_reasons(self, force_show=False):
+    def show_rejection_reasons(self):
         """
         function to show and hide rejection reasons
         """
+        self.rej_annotations = []
 
-        # print(force_show)
+        for i in range(self.win_step):
+            trial = self.slider.val + i
 
-        if not self.rej_reasons_on:
+            for ch in np.where(self.rej_chans[trial])[0]:
+                an = self.ax.annotate(
+                    f"{self.chan_labels[ch]}: {self.rej_reasons[trial,ch]} (R)",
+                    (i * self.epoch_len, self.ys[ch]),
+                    backgroundcolor="white",
+                    annotation_clip=False,
+                )
+                self.rej_annotations.append(an)
 
-            for i in range(self.win_step):
-                trial = self.slider.val + i
+    def show_port_codes(self):
+        """
+        Function to show port codes for trials on screen
+        """
 
-                for ch in np.where(self.rej_chans[trial])[0]:
-                    self.ax.annotate(
-                        f"{self.chan_labels[ch]}: {self.rej_reasons[trial,ch]} (R)",
-                        (i * self.epoch_len, self.ys[ch]),
-                        backgroundcolor="white",
-                        annotation_clip=False,
-                    )
-            self.rej_reasons_on = True
+        self.code_annotations = []
+        all_codes = []
+        all_times = []
+        for i in range(self.win_step):
+            times = self.all_times[self.slider.val + i]
+            all_times.extend([t + i * self.epoch_len for t in times])
+            all_codes.extend(self.all_codes[self.slider.val + i])
 
-        else:
+        self.code_lines = self.ax.vlines(all_times, *self.ylim, color="g")
 
-            for child in self.ax.get_children():
-                if isinstance(child, Annotation) and "(R)" in child.get_text():
-                    child.remove()
-            self.rej_reasons_on = False
-        self.fig.canvas.draw_idle()
+        for code, time in zip(all_codes, all_times):
+            an = self.ax.annotate(code, (time, self.ylim[1] + 5e-6), ha="center", annotation_clip=False)
+            self.code_annotations.append(an)
 
     def update(self, force=False):
         pos = self.slider.val
@@ -440,6 +477,10 @@ class Visualizer:
         else:
             self.ax.clear()
             self.plot_pos(pos)
+            if self.rej_reasons_on:
+                self.show_rejection_reasons()
+            if self.port_codes_on:
+                self.show_port_codes()
             if force:
                 self.fig.canvas.draw_idle()
             else:
@@ -483,7 +524,28 @@ class Visualizer:
                 self.save_annotations()
 
             case "r":
-                self.rejection_reasons()
+                if self.rej_reasons_on:
+                    for an in self.rej_annotations:
+                        an.remove()
+                    self.rej_reasons_on = False
+                    self.fig.canvas.draw_idle()
+                else:
+                    self.show_rejection_reasons()
+                    self.rej_reasons_on = True
+                    self.fig.canvas.draw_idle()
+
+            case "p":
+                if self.port_codes_on:
+                    for an in self.code_annotations:
+                        an.remove()
+                    self.code_lines.remove()
+                    self.port_codes_on = False
+
+                    self.fig.canvas.draw_idle()
+                else:
+                    self.port_codes_on = True
+                    self.show_port_codes()
+                    self.fig.canvas.draw_idle()
 
             case "c":
                 self.stack = not self.stack
