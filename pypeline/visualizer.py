@@ -118,20 +118,8 @@ class Visualizer:
             self.rej_manual = self.rej_chans.any(1)
 
         self.info = self.epochs_obj.info
-        self.chan_types = self.info.get_channel_types()
-
-        self.chan_order = np.concatenate(  # reorder channels in order EEG / EOG / eyetracking / other
-            (
-                mne.pick_types(self.info, eeg=True),
-                mne.pick_types(self.info, eog=True),
-                mne.pick_types(self.info, eyetrack="eyegaze"),
-                mne.pick_types(self.info, misc=True),
-            )
-        )
-
-        self.chan_labels = np.array(self.epochs_obj.ch_names)[self.chan_order]
-        self.rej_chans = self.rej_chans[:, self.chan_order]
-        self.chan_types = np.array(self.chan_types)[self.chan_order]
+        self.chan_types = np.array(self.info.get_channel_types())
+        self.chan_labels = np.array(self.epochs_obj.ch_names)
 
         self.channels_ignore = channels_ignore  # make a mask for channels we ignore
         self.ignored_channels_mask = np.in1d(self.chan_labels, channels_ignore)
@@ -183,8 +171,6 @@ class Visualizer:
         }  # must be in order and increasing
 
         epochs_raw = self.epochs_raw.copy()
-
-        epochs_raw = epochs_raw[:, self.chan_order]
 
         epochs_raw *= self.extra_chan_scale
 
