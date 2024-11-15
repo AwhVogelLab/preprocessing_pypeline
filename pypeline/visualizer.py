@@ -473,10 +473,25 @@ class Visualizer:
             if isinstance(child, Annotation) and text in child.get_text():
                 child.remove()
 
-    def show_port_codes(self, show=True):
+    def show_port_codes(self):
         """
-        Function to show port codes
+        Function to show port codes for trials on screen
         """
+
+        self.code_annotations = []
+        all_codes = []
+        all_times = []
+        for i in range(self.win_step):
+            times = self.all_times[self.slider.val + i]
+            all_times.extend([t + i * self.epoch_len for t in times])
+            all_codes.extend(self.all_codes[self.slider.val + i])
+
+        self.ax.vlines(all_times, *self.ylim, color="g")
+
+        for code, time in zip(all_codes, all_times):
+            an = self.ax.annotate(code, (time, self.ylim[1] + 5e-6), ha="center", annotation_clip=False)
+            self.code_annotations.append(an)
+        self.fig.canvas.draw_idle()
 
     def update(self, force=False):
         pos = self.slider.val
