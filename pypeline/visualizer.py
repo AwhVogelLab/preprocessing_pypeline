@@ -106,17 +106,6 @@ class Visualizer:
                 self.rej_reasons = self.rej_reasons[:, ~np.in1d(self.epochs_obj.ch_names, channels_drop)]
                 self.epochs_obj.drop_channels(channels_drop)
 
-        if load_flags:  # manually load any previously saved rejection flags
-            self.data_path.update(suffix="rejection_flags", extension=".npy")
-            try:
-                self.rej_manual = np.load(self.data_path.fpath)
-                print("You have saved annotations already. Loading these.")
-            except FileNotFoundError:
-                print("No saved annotations found, resetting to default.")
-                self.rej_manual = self.rej_chans.any(1)
-        else:
-            self.rej_manual = self.rej_chans.any(1)
-
         self.info = self.epochs_obj.info
         self.chan_types = np.array(self.info.get_channel_types())
         self.chan_labels = np.array(self.epochs_obj.ch_names)
@@ -134,6 +123,17 @@ class Visualizer:
         if channels_ignore is not None:  # never reject ignored channels (eg EOG)
             self.rej_chans[:, self.ignored_channels_mask] = False
             self.rej_reasons[:, self.ignored_channels_mask] = None
+
+        if load_flags:  # manually load any previously saved rejection flags
+            self.data_path.update(suffix="rejection_flags", extension=".npy")
+            try:
+                self.rej_manual = np.load(self.data_path.fpath)
+                print("You have saved annotations already. Loading these.")
+            except FileNotFoundError:
+                print("No saved annotations found, resetting to default.")
+                self.rej_manual = self.rej_chans.any(1)
+        else:
+            self.rej_manual = self.rej_chans.any(1)
 
         self.epochs_raw = self.epochs_obj.get_data(copy=True)
         self.epochs_pre = None  # initialized when we preprocess
