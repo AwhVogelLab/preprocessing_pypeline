@@ -175,8 +175,9 @@ class Preprocess:
             extension=".tsv",
             check="false",
         )
+        path.mkdir()
         for f in glob(os.path.join(self.root_dir, subject_number, "*.csv")):
-            if "beh" in f:
+            if "_data" in f:
                 pd.read_csv(f).to_csv(path.fpath, sep="\t")
 
     def import_eyetracker(self, subject_number, keyword=None, overwrite=False):
