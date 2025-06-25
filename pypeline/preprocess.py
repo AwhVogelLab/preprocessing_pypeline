@@ -33,8 +33,9 @@ class Preprocess:
         srate: int | None = None,  # data sampling rate (Hz)
         no_et_spaces: bool = True,  # are there spaces in the eyetracking file?
         event_names: dict | None = None,  # names of each condition code. Can take custom events (not in data)
-        baseline_time=None,  # times for baselining
-        rejection_time=(None, None),  # times to do rejection
+        baseline_time: tuple[float, float] | None = None,  # times for baselining
+        rejection_time: tuple[float, float] | None = None,  # times to do rejection
+        reject_between_codes: tuple | None = None,  # reject trials between these codes
         drop_channels=None,  # channels to drop outright (not recommendedd)
         experiment_name=None,  # name of your experiment
     ):
@@ -68,9 +69,44 @@ class Preprocess:
         self.filter_freqs = filter_freqs
         self.no_et_spaces = no_et_spaces
         self.baseline_time = baseline_time
-        rejection_time[0] = trial_start if rejection_time[0] is None else rejection_time[0]
-        rejection_time[1] = trial_end if rejection_time[1] is None else rejection_time[1]
-        self.rejection_time = rejection_time
+
+        if rejection_time is not None and reject_between_codes is not None:
+            raise ValueError("You cannot specify both rejection_time and reject_between_codes")
+
+        elif rejection_time is not None:
+            # check time is valid
+
+            if rejection_time[0] is None and rejection_time[1] is not None:
+                self.rejection_time = (trial_start, rejection_time[1])
+            elif rejection_time[0] is not None and rejection_time[1] is None:
+                self.rejection_time = (rejection_time[0], trial_end)
+            elif rejection_time[0] is None and rejection_time[1] is None:
+                # for backwards compatibility
+                self.rejection_time = (trial_start, trial_end)
+            else:
+                self.rejection_time = rejection_time
+
+            # checking for invalid values
+            if len(rejection_time) != 2:
+                raise ValueError("rejection_time must be a tuple of length 2")
+            if rejection_time[0] >= rejection_time[1]:
+                raise ValueError("rejection_time[0] must be less than rejection_time[1]")
+            if rejection_time[0] < trial_start or rejection_time[1] > trial_end:
+                raise ValueError("rejection_time must be within the trial time range")
+
+            self.rejection_codes = None
+
+        elif reject_between_codes is not None:
+            if len(reject_between_codes) != 2:
+                raise ValueError("reject_between_codes must be a tuple of length 2")
+            if reject_between_codes[0] not in event_dict.values() or reject_between_codes[1] not in event_dict.values():
+                raise ValueError("inputs to reject_between_codes must be valid event codes")
+            self.rejection_codes = reject_between_codes
+            self.rejection_time = None
+
+        else:
+            self.rejection_time = (trial_start, trial_end)
+
         self.drop_channels = drop_channels
         self.experiment_name = experiment_name
 
@@ -381,8 +417,6 @@ class Preprocess:
             tmax=self.trial_end_t,
             on_missing="ignore",
             baseline=self.baseline_time,
-            reject_tmin=self.rejection_time[0],
-            reject_tmax=self.rejection_time[1],
             preload=True,
             decim=decim,
         ).drop(
@@ -447,8 +481,6 @@ class Preprocess:
             tmax=self.trial_end_t,
             on_missing="ignore",
             baseline=self.baseline_time,
-            reject_tmin=self.rejection_time[0],
-            reject_tmax=self.rejection_time[1],
             preload=True,
             decim=decim,
         ).drop(
