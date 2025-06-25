@@ -14,20 +14,25 @@ FILTER_FREQS = (0, 80)  # low, high
 
 
 class Preprocess:
+
     def __init__(
         self,
         data_dir: str,  # where you keep datasets
         root_dir: str,  # location of RAW data
         trial_start: float,  # start of trial (ms)
         trial_end: float,  # end of trial (ms)
-        stim_conditions: list,  # valid condition labels
-        timelock_ix: int,  # which position to timelock to (in event_code_dict)
-        event_dict: dict,  # event name: code mapping
+        event_dict: dict,  # event name: code mapping. ONLY events in data
         event_code_dict: dict,  # event code: sequence mapping
-        filter_freqs=FILTER_FREQS,  # frequencies for bandpass filtering
-        srate: int = None,  # data sampling rate (Hz)
+        timelock_ix: (
+            int | dict | None
+        ) = None,  # Where to timelock in event_code dict. Can either be an int (same for all events) or a dict with event codes as keys and indices as values.
+        # If None, will use the first occurrence of each event code in event_code_dict
+        filter_freqs: tuple[
+            None | int | float, None | int | float
+        ] = FILTER_FREQS,  # frequencies for bandpass filtering
+        srate: int | None = None,  # data sampling rate (Hz)
         no_et_spaces: bool = True,  # are there spaces in the eyetracking file?
-        event_names: dict = None,  # names of each annotation
+        event_names: dict | None = None,  # names of each condition code. Can take custom events (not in data)
         baseline_time=None,  # times for baselining
         rejection_time=(None, None),  # times to do rejection
         drop_channels=None,  # channels to drop outright (not recommendedd)
@@ -40,7 +45,6 @@ class Preprocess:
         self.trial_start_t = trial_start
         self.trial_end_t = trial_end
         self.event_dict = event_dict
-        self.stim_conditions = stim_conditions
         self.event_code_dict = event_code_dict
         self.event_names = event_names if event_names is not None else event_dict
         self.event_names.update(  # these occasionally appear
@@ -49,7 +53,18 @@ class Preprocess:
                 "New Segment/LostSamples: 2": 10001,
             }
         )
-        self.timelock_ix = timelock_ix
+
+        if type(timelock_ix) is dict:
+            self.timelock_ix = timelock_ix
+        elif type(timelock_ix) is int:
+            self.timelock_ix = {k: timelock_ix for k in self.event_code_dict.keys()}
+        elif timelock_ix is None:
+            self.timelock_ix = {k: v.index(k) for k, v in event_code_dict.items()}
+        else:
+            raise TypeError(
+                "timelock_ix must be either an int, a dict with event codes as keys and indices as values, or None"
+            )
+
         self.filter_freqs = filter_freqs
         self.no_et_spaces = no_et_spaces
         self.baseline_time = baseline_time
@@ -757,7 +772,7 @@ class Preprocess:
 
                 else:
                     new_events.append(code)
-                    new_times.append(events[i + self.timelock_ix, 0])
+                    new_times.append(events[i + self.timelock_ix[code], 0])
         new_event_list = np.stack((new_times, np.zeros(len(new_times)), new_events), axis=1).astype(int)
         return new_event_list
 
