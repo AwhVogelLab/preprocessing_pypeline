@@ -145,7 +145,8 @@ class Preprocess:
                 events = pd.read_csv(bids_path.copy().update(suffix="events", extension=".tsv").fpath, sep="\t")
 
                 return eegdata, events
-            except FileNotFoundError:
+            except FileNotFoundError as e:
+                print(e)
                 print("Could not find EEG data in your directory. I will try to import it from the raw data")
 
         subject_dir = os.path.join(self.root_dir, subject_number)
@@ -290,12 +291,12 @@ class Preprocess:
 
                 # events should be already saved regardless
                 path.update(suffix="events", extension=".tsv")
-                eye_events = pd.read_csv(path.fpath, sep="\t", index=False)
+                eye_events = pd.read_csv(path.fpath, sep="\t", index_col=False)
 
                 return eye, eye_events
 
             except FileNotFoundError:
-                print("Could not find EEG data in your directory. I will try to import it from the raw data")
+                print("Could not find Eyetracking data in your directory. I will try to import it from the raw data")
 
         path.mkdir()
 
@@ -402,8 +403,8 @@ class Preprocess:
         # only picks out the first stimulus
         new_events = []
         new_times = []
-        new_events_all = []
-        new_times_all = []
+        lock_events = []
+        lock_times = []
         for i in range(len(events)):
             for code, sequence in self.event_code_dict.items():
                 try:
@@ -416,10 +417,43 @@ class Preprocess:
                     break  # end of events array
 
                 else:
-                    new_events.append(code)
-                    new_times.append(events[i + self.timelock_ix[code], 0])
-        new_event_list = np.stack((new_times, np.zeros(len(new_times)), new_events), axis=1).astype(int)
-        return new_event_list
+
+                    lock_events.append(code)  # good for eyetracking, only keep events we are locking to
+                    lock_times.append(events[i + self.timelock_ix[code], 0])
+
+                    cond_events = events[i : i + len(sequence), 2]
+                    cond_events[self.timelock_ix[code]] = code  # replace the timelock event with the assigned code
+
+                    new_events.append(cond_events)
+                    new_times.append(events[i : i + len(sequence), 0])
+
+        new_events = np.concatenate(new_events)
+        new_times = np.concatenate(new_times)
+        filtered_events = np.stack((new_times, np.zeros(len(new_times)), new_events), axis=1).astype(int)
+        filtered_timelock_events = np.stack((lock_times, np.zeros(len(lock_times)), lock_events), axis=1).astype(int)
+
+        return filtered_timelock_events, filtered_events
+
+    def _make_metadata_from_events(self, events):
+
+        event_dict_inv = {v: k for k, v in self.event_dict.items()}
+        trial_keys = np.vectorize(event_dict_inv.get)(
+            np.unique(np.concatenate([v for v in self.event_code_dict.values()]))
+        )
+        row_events = [event_dict_inv[k] for k in self.event_code_dict.keys()]
+
+        metadata, metadata_events, meta_id = mne.epochs.make_metadata(
+            events,
+            self.event_dict,
+            tmin=self.trial_start_t,
+            tmax=self.trial_end_t * 2,  # double the time to account for delay end / long response
+            sfreq=self.srate,
+            row_events=row_events,
+        )
+
+        metadata = metadata[trial_keys]  # limit to events appearing in the trial
+
+        return metadata, metadata_events
 
     def make_eeg_epochs(self, eeg, eeg_events, eeg_trials_drop=None):
         """
@@ -441,7 +475,8 @@ class Preprocess:
 
         # convert event dataframe to mne format (array of sample, duration, value)
         eeg_events = self._convert_bids_events(eeg_events)
-        eeg_events = self._filter_events(eeg_events)
+        _, eeg_events = self._filter_events(eeg_events)
+        metadata, metadata_events = self._make_metadata_from_events(eeg_events)
 
         # get EEG epochs object
         assert eeg.info["sfreq"] % self.srate == 0
@@ -449,11 +484,12 @@ class Preprocess:
 
         epochs = mne.Epochs(
             eeg,
-            eeg_events,
+            metadata_events,
             self.event_dict,
             tmin=self.trial_start_t,
             tmax=self.trial_end_t,
             on_missing="ignore",
+            metadata=metadata,
             baseline=self.baseline_time,
             preload=True,
             decim=decim,
@@ -504,8 +540,10 @@ class Preprocess:
         eye_events = self._convert_bids_events(eye_events)
         eeg_events = eeg_events[~np.isin(eeg_events, unmatched_codes).any(axis=1)]
         eye_events = eye_events[~np.isin(eye_events, unmatched_codes).any(axis=1)]
-        eeg_events = self._filter_events(eeg_events)
-        eye_events = self._filter_events(eye_events)
+        _, eeg_events = self._filter_events(eeg_events)  # get all events
+        eye_events, _ = self._filter_events(eye_events)  # only get events we timelock to
+
+        metadata, metadata_events = self._make_metadata_from_events(eeg_events)  # only from EEG data
 
         # get EEG epochs object
         assert eeg.info["sfreq"] % self.srate == 0
@@ -513,11 +551,12 @@ class Preprocess:
 
         eeg_epochs = mne.Epochs(
             eeg,
-            eeg_events,
+            metadata_events,
             self.event_dict,
             tmin=self.trial_start_t,
             tmax=self.trial_end_t,
             on_missing="ignore",
+            metadata=metadata,
             baseline=self.baseline_time,
             preload=True,
             decim=decim,
