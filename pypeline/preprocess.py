@@ -46,6 +46,7 @@ class Preprocess:
         self.trial_start_t = trial_start
         self.trial_end_t = trial_end
         self.event_dict = event_dict
+        self.event_dict_inv = {v: k for k, v in event_dict.items()}  # invert for later use
         self.event_code_dict = event_code_dict
         self.event_names = event_names if event_names is not None else event_dict
         self.event_names.update(  # these occasionally appear
@@ -436,11 +437,10 @@ class Preprocess:
 
     def _make_metadata_from_events(self, events):
 
-        event_dict_inv = {v: k for k, v in self.event_dict.items()}
-        trial_keys = np.vectorize(event_dict_inv.get)(
+        trial_keys = np.vectorize(self.event_dict_inv.get)(
             np.unique(np.concatenate([v for v in self.event_code_dict.values()]))
         )
-        row_events = [event_dict_inv[k] for k in self.event_code_dict.keys()]
+        row_events = [self.event_dict_inv[k] for k in self.event_code_dict.keys()]
 
         metadata, metadata_events, meta_id = mne.epochs.make_metadata(
             events,
@@ -635,14 +635,32 @@ class Preprocess:
         """
         grab the data from the rejection period, which might be smaller than epoch length
         """
-        return epochs.get_data(copy=True)[
-            :,
-            :,
-            np.logical_and(
-                epochs.times >= self.rejection_time[0],
-                epochs.times <= self.rejection_time[1],
-            ),
-        ]
+
+        if self.rejection_time is not None:
+            return epochs.get_data(copy=True)[
+                :,
+                :,
+                np.logical_and(
+                    epochs.times >= self.rejection_time[0],
+                    epochs.times <= self.rejection_time[1],
+                ),
+            ]
+
+        elif self.rejection_codes is not None:  # use rejection codes and return a masked array
+
+            rejection_start_code = self.event_dict_inv[self.rejection_codes[0]]
+            rejection_end_code = self.event_dict_inv[self.rejection_codes[1]]
+            rejection_time_ix = ~np.logical_and(
+                epochs.times[:, np.newaxis] > epochs.metadata[rejection_start_code].to_numpy(),
+                epochs.times[:, np.newaxis] < epochs.metadata[rejection_end_code].to_numpy(),
+            ).T  # trials x timepoints matrix of times to reject within. Inverted (because masking will mask these)
+
+            epoch_data = epochs.get_data(copy=True)
+            rejection_time_ix = np.broadcast_to(
+                rejection_time_ix[:, np.newaxis, :], (epoch_data.shape)
+            )  # broadcast to match shape. Yes this is necessary
+
+            return np.ma.masked_array(epoch_data, mask=rejection_time_ix)
 
     def _conv_ms_to_samples(self, dur, epochs):
         """
@@ -897,8 +915,7 @@ class Preprocess:
         # EVENTS
 
         events_final = pd.DataFrame(epochs.events, columns=["sample", "duration", "value"])
-        event_dict_inv = {v: k for k, v in self.event_dict.items()}
-        get_events = lambda trl: event_dict_inv[trl["value"]]
+        get_events = lambda trl: self.event_dict_inv[trl["value"]]
         events_final["trial_type"] = events_final.apply(get_events, axis=1)
         events_final["onset"] = events_final["sample"] / self.srate
         events_final = events_final[["onset", "duration", "trial_type", "value", "sample"]]
