@@ -26,13 +26,14 @@ class Visualizer:
         trial_start: float,
         trial_end: float,
         experiment_name: str,
-        rejection_time=(None, None),
+        rejection_time: tuple[float | None, float | None] = (None, None),
         win_step: int = SLIDER_STEP,
-        downscale={"eyegaze": EYETRACK_SCALE},
-        chan_offset=CHAN_OFFSET,
-        channels_drop=None,
-        channels_ignore=None,
-        load_flags=True,
+        downscale: dict = {"eyegaze": EYETRACK_SCALE},
+        chan_offset: float = CHAN_OFFSET,
+        channels_drop: list = None,
+        channels_ignore: list = None,
+        load_flags: bool = True,
+        port_codes_show: list | None = None,  # list of port codes to show, if None then all are shown
     ):
         self.sub = sub
         self.parent_dir = parent_dir
@@ -83,6 +84,9 @@ class Visualizer:
                 & (all_port_codes["sample"] < trial_sample + self.trial_end * 1000)
             ]
             # get codes which occured in a (trial_start, trial_end) sample around each trial's timelock event
+
+            if port_codes_show is not None:
+                trial_codes = trial_codes[trial_codes["value"].isin(port_codes_show)]
             code_times = np.array(trial_codes["sample"])
             code_times -= trial_sample
             code_times -= int(self.trial_start * 1000)
