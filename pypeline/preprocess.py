@@ -36,7 +36,7 @@ class Preprocess:
         baseline_time: tuple[float, float] | None = None,  # times for baselining
         rejection_time: tuple[float, float] | None = None,  # times to do rejection
         reject_between_codes: tuple | None = None,  # reject trials between these codes
-        drop_channels=None,  # channels to drop outright (not recommendedd)
+        drop_channels=None,  # channels to drop outright (not recommended)
         experiment_name=None,  # name of your experiment
     ):
 
