@@ -385,7 +385,7 @@ class Visualizer:
         # Plot time labels
 
         if self.rejection_time[0] == self.trial_start and self.rejection_time[1] == self.trial_end:
-            pass
+            self.ax.set_xticks([])
         elif self.rejection_time[0] == self.trial_start:
             self.ax.set_xticks(
                 np.arange(

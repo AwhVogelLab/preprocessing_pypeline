@@ -276,8 +276,7 @@ class Preprocess:
                 if len(asc_file) == 0:
                     raise FileNotFoundError("No .asc file. I will try to re-import the data")
                 elif len(asc_file) == 1:
-                    asc_file = os.path.join(subject_dir, asc_file[0])
-                    eye = mne.io.read_raw_eyelink(asc_file, create_annotations=["blinks", "messages"])
+                    eye = mne.io.read_raw_eyelink(path.fpath, create_annotations=["blinks", "messages"])
 
                 else:
                     print(
@@ -285,7 +284,7 @@ class Preprocess:
                     )
                     raws = []
                     for ifile, file in enumerate(asc_file):
-                        file = os.path.join(subject_dir, file)
+                        file = os.path.join(path.fpath.parent, file)
                         ascpath = path.copy().update(split=ifile + 1)
                         raws.append(mne.io.read_raw_eyelink(file, create_annotations=["blinks", "messages"]))
                     eye = mne.concatenate_raws(raws)
@@ -296,7 +295,8 @@ class Preprocess:
 
                 return eye, eye_events
 
-            except FileNotFoundError:
+            except FileNotFoundError as e:
+                print(e)
                 print("Could not find Eyetracking data in your directory. I will try to import it from the raw data")
 
         path.mkdir()
