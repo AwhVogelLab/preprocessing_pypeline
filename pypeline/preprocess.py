@@ -708,7 +708,9 @@ class Preprocess:
             for st in win_starts:
                 data_min = np.nanmin(eegdata[:, chans, st : st + win], axis=2)
                 data_max = np.nanmax(eegdata[:, chans, st : st + win], axis=2)
-                rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], (data_max - data_min) > threshold)
+                reject = (data_max - data_min) > threshold
+                reject = reject.filled(False)  # fill masked values with False so they aren't rejected
+                rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], reject)
 
         # if both eyes are recorded, then ONLY mark artifacts if they appear in both eyes
         rej_chans = self._check_both_eyes(epochs.ch_names, rej_chans)
@@ -789,25 +791,18 @@ class Preprocess:
         eegdata = self._get_data_from_rej_period(epochs)
         chans = np.array(epochs.info.get_channel_types()) == "eeg"  # TODO: make more flexible?
 
-        # Note, using times from the epochs object means that slope will always be in V/S units
-        xs = epochs.times[
-            np.logical_and(
-                epochs.times >= self.rejection_time[0],
-                epochs.times <= self.rejection_time[1],
-            )
-        ]
-
-        A = np.vstack([xs, np.ones(len(xs))]).T
         slopes = np.full((eegdata.shape[0:2]), 0, dtype=float)
         ssrs = np.full((eegdata.shape[0:2]), 0, dtype=float)
 
         for itrial in range(eegdata.shape[0]):
-            (slopes[itrial, chans], _), ssrs[itrial, chans], _, _ = np.linalg.lstsq(
-                A, eegdata[itrial, chans].T, rcond=None
-            )
+            trial_data = eegdata[itrial, chans]
+            trial_data = trial_data[:, ~trial_data.mask.any(0)].filled()
+            xs = np.arange(trial_data.shape[1])
+            A = np.vstack([xs, np.ones(len(xs))]).T
+            (slopes[itrial, chans], _), ssrs[itrial, chans], _, _ = np.linalg.lstsq(A, trial_data.T, rcond=None)
 
         r2s = 1 - ssrs / (eegdata.shape[2] * eegdata.var(axis=2))  # double check value for n
-        rej_linear = np.logical_and(r2s > min_r2, slopes > min_slope)
+        rej_linear = np.logical_and(r2s > min_r2, slopes > min_slope).filled()
         return rej_linear
 
     def artreject_flatline(self, epochs, rejection_criteria, flatline_duration=200):
