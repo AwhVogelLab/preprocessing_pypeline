@@ -435,7 +435,7 @@ class Preprocess:
 
         return filtered_timelock_events, filtered_events
 
-    def _make_metadata_from_events(self, events):
+    def _make_metadata_from_events(self, events, srate):
 
         trial_keys = np.vectorize(self.event_dict_inv.get)(
             np.unique(np.concatenate([v for v in self.event_code_dict.values()]))
@@ -447,7 +447,7 @@ class Preprocess:
             self.event_dict,
             tmin=self.trial_start_t,
             tmax=self.trial_end_t * 2,  # double the time to account for delay end / long response
-            sfreq=self.srate,
+            sfreq=srate,
             row_events=row_events,
         )
 
@@ -476,7 +476,7 @@ class Preprocess:
         # convert event dataframe to mne format (array of sample, duration, value)
         eeg_events = self._convert_bids_events(eeg_events)
         _, eeg_events = self._filter_events(eeg_events)
-        metadata, metadata_events = self._make_metadata_from_events(eeg_events)
+        metadata, metadata_events = self._make_metadata_from_events(eeg_events, eeg.info["sfreq"])
 
         # get EEG epochs object
         assert eeg.info["sfreq"] % self.srate == 0
@@ -543,7 +543,7 @@ class Preprocess:
         _, eeg_events = self._filter_events(eeg_events)  # get all events
         eye_events, _ = self._filter_events(eye_events)  # only get events we timelock to
 
-        metadata, metadata_events = self._make_metadata_from_events(eeg_events)  # only from EEG data
+        metadata, metadata_events = self._make_metadata_from_events(eeg_events, eeg.info["sfreq"])  # only from EEG data
 
         # get EEG epochs object
         assert eeg.info["sfreq"] % self.srate == 0
@@ -661,6 +661,9 @@ class Preprocess:
             )  # broadcast to match shape. Yes this is necessary
 
             return np.ma.masked_array(epoch_data, mask=rejection_time_ix)
+
+        else:
+            return epochs.get_data(copy=True)
 
     def _conv_ms_to_samples(self, dur, epochs):
         """
