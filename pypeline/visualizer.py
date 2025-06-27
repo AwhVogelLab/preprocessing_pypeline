@@ -23,10 +23,8 @@ class Visualizer:
         sub,
         parent_dir: str,
         srate: float,
-        trial_start: float,
-        trial_end: float,
         experiment_name: str,
-        rejection_time: tuple[float | None, float | None] = (None, None),
+        rejection_time: list[float | None, float | None] = [None, None],
         win_step: int = SLIDER_STEP,
         downscale: dict = {"eyegaze": EYETRACK_SCALE},
         chan_offset: float = CHAN_OFFSET,
@@ -39,12 +37,8 @@ class Visualizer:
         self.parent_dir = parent_dir
         self.experiment_name = experiment_name
         self.srate = srate
-        self.trial_start = trial_start
-        self.trial_end = trial_end
         self.win_step = win_step
-        self.epoch_len = np.ceil((trial_end - trial_start) * srate)
-        rejection_time[0] = trial_start if rejection_time[0] is None else rejection_time[0]
-        rejection_time[1] = trial_end if rejection_time[1] is None else rejection_time[1]
+
         self.rejection_time = rejection_time
         self.downscale = downscale
         self.chan_offset = chan_offset
@@ -61,42 +55,30 @@ class Visualizer:
         self.data_path.update(suffix="eeg", extension=".fif")  # load in preprocessed data
         self.epochs_obj = mne.read_epochs(self.data_path.fpath)
 
+        # get trial start and end time from epochs object
+        self.trial_start = self.epochs_obj.times[0]
+        self.trial_end = self.epochs_obj.times[-1]
+        self.epoch_len = len(self.epochs_obj.times)
+        rejection_time[0] = self.trial_start if rejection_time[0] is None else rejection_time[0]
+        rejection_time[1] = self.trial_end if rejection_time[1] is None else rejection_time[1]
+
         self.data_path.update(suffix="events", extension=".tsv")  # load in events
 
         self.events = pd.read_csv(self.data_path.fpath, sep="\t")
-        ## EEG Port codes
-        all_port_codes = pd.read_csv(
-            self.data_path.copy()
-            .update(root=self.data_path.root.parent, description=None, suffix="events", extension="tsv")
-            .fpath,
-            sep="\t",
-        )
 
-        # re-index port code timings for each trial
-
-        self.all_codes = []
-        self.all_times = []
-
-        for _, row in self.events.iterrows():
-            trial_sample = row["sample"]
-            trial_codes = all_port_codes[
-                (all_port_codes["sample"] > trial_sample + self.trial_start * 1000)
-                & (all_port_codes["sample"] < trial_sample + self.trial_end * 1000)
-            ]
-            # get codes which occured in a (trial_start, trial_end) sample around each trial's timelock event
-
-            if port_codes_show is not None:
-                trial_codes = trial_codes[trial_codes["value"].isin(port_codes_show)]
-            code_times = np.array(trial_codes["sample"])
-            code_times -= trial_sample
-            code_times -= int(self.trial_start * 1000)
-            self.all_codes.append(trial_codes["value"].tolist())
-            self.all_times.append(code_times.tolist())
-
-        if len(self.all_codes) != len(self.events):
-            raise RuntimeError(
-                f"Error: could not find port codes for all trials. There are {len(self.events)} trials and {len(self)} sets of codes at corresponding times"
-            )
+        ## EEG Port codes from metadata
+        self.all_port_codes = []
+        self.all_portcode_times = []
+        for _, row in self.epochs_obj.metadata.iterrows():
+            row = row.dropna()
+            row = row[np.logical_and(row > self.trial_start, row < self.trial_end)]
+            row.sort_values(inplace=True)
+            self.all_port_codes.append(
+                [self.epochs_obj.event_id[ev] for ev in row.index]
+            )  # numeric values for each event
+            self.all_portcode_times.append(
+                np.rint((row.to_numpy().astype(float) - self.trial_start) * self.srate).astype(int).tolist()
+            )  # convert time to samples
 
         self.data_path.update(suffix="artifacts", extension=".tsv")  # load in artifacts and apply to channels
         rej = pd.read_csv(self.data_path.fpath, sep="\t", keep_default_na=False)
@@ -303,13 +285,13 @@ class Visualizer:
             )
             if self.rej_manual[epoch]:
                 self.ax.plot(
-                    np.arange(i * self.epoch_len, (i + 1) * self.epoch_len + 1),
+                    np.arange(i * self.epoch_len, (i + 1) * self.epoch_len),
                     epochs[epoch, self.rej_chans[epoch]].T,
                     color="#FF0000",
                     linewidth=1,
                 )
                 self.ax.fill_between(
-                    [i * self.epoch_len, (i + 1) * self.epoch_len + 1],
+                    [i * self.epoch_len, (i + 1) * self.epoch_len],
                     [self.ylim[0]],
                     [self.ylim[1]],
                     color="#edb74a",
@@ -460,9 +442,9 @@ class Visualizer:
         all_codes = []
         all_times = []
         for i in range(self.win_step):
-            times = self.all_times[self.slider.val + i]
+            times = self.all_portcode_times[self.slider.val + i]
             all_times.extend([t + i * self.epoch_len for t in times])
-            all_codes.extend(self.all_codes[self.slider.val + i])
+            all_codes.extend(self.all_port_codes[self.slider.val + i])
 
         self.code_lines = self.ax.vlines(all_times, *self.ylim, color="g")
 
