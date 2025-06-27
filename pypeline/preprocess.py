@@ -792,20 +792,24 @@ class Preprocess:
         """
 
         eegdata = self._get_data_from_rej_period(epochs)
+        rej_linear = np.full((eegdata.shape[0:2]), False)  # assign to all channels first
         chans = np.array(epochs.info.get_channel_types()) == "eeg"  # TODO: make more flexible?
+        eegdata = eegdata[:, chans, :]  # only keep EEG channels
 
         slopes = np.full((eegdata.shape[0:2]), 0, dtype=float)
         ssrs = np.full((eegdata.shape[0:2]), 0, dtype=float)
 
         for itrial in range(eegdata.shape[0]):
-            trial_data = eegdata[itrial, chans]
-            trial_data = trial_data[:, ~trial_data.mask.any(0)].filled()
+            trial_data = eegdata[itrial]
+            trial_data = trial_data[
+                :, ~trial_data.mask.any(0)
+            ].filled()  # take out masked timepoints bc don't play nice with linear regression
             xs = np.arange(trial_data.shape[1])
             A = np.vstack([xs, np.ones(len(xs))]).T
-            (slopes[itrial, chans], _), ssrs[itrial, chans], _, _ = np.linalg.lstsq(A, trial_data.T, rcond=None)
+            (slopes[itrial], _), ssrs[itrial], _, _ = np.linalg.lstsq(A, trial_data.T, rcond=None)
 
-        r2s = 1 - ssrs / (eegdata.shape[2] * eegdata.var(axis=2))  # double check value for n
-        rej_linear = np.logical_and(r2s > min_r2, slopes > min_slope).filled()
+        r2s = 1 - ssrs / (eegdata.shape[2] * eegdata.var(axis=2)).filled()  # double check value for n
+        rej_linear[:, chans] = np.logical_and(r2s > min_r2, slopes > min_slope)
         return rej_linear
 
     def artreject_flatline(self, epochs, rejection_criteria, flatline_duration=200):
