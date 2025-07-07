@@ -774,7 +774,9 @@ class Preprocess:
 
                 first_half = np.nanmean(eegdata[:, chans, st : st + win // 2], axis=2)
                 last_half = np.nanmean(eegdata[:, chans, st + win // 2 : st + win], axis=2)
-                rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], np.abs(first_half - last_half) > threshold)
+                reject = np.abs(first_half - last_half) > threshold
+                reject = reject.filled(False)  # fill masked values with False so they aren't rejected
+                rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], reject)
 
         # if both eyes are recorded, then ONLY mark artifacts if they appear in both eyes
         rej_chans = self._check_both_eyes(epochs.ch_names, rej_chans)
