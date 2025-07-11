@@ -842,8 +842,10 @@ class Preprocess:
                 np.diff(  # see if the gap between indices is bigger than the duration
                     np.where(  # find the indices of non-flat moments
                         np.concatenate(
-                            ([True], non_flats, [True])
-                        )  # add True to the beginning and end of the array, to avoid unbounded runs of flats
+                            # add True to the beginning and end of the array, to avoid unbounded runs of flats
+                            # also converts masked values to True, so they are non considered flat
+                            ([True], non_flats.filled(True), [True])
+                        )
                     )[0]
                 )
                 >= duration
