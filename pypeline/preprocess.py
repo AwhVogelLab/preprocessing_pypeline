@@ -712,7 +712,8 @@ class Preprocess:
                 data_min = np.nanmin(eegdata[:, chans, st : st + win], axis=2)
                 data_max = np.nanmax(eegdata[:, chans, st : st + win], axis=2)
                 reject = (data_max - data_min) > threshold
-                reject = reject.filled(False)  # fill masked values with False so they aren't rejected
+                if hasattr(reject, "mask"):
+                    reject = reject.filled(False)  # fill masked values with False so they aren't rejected
                 rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], reject)
 
         # if both eyes are recorded, then ONLY mark artifacts if they appear in both eyes
@@ -775,7 +776,8 @@ class Preprocess:
                 first_half = np.nanmean(eegdata[:, chans, st : st + win // 2], axis=2)
                 last_half = np.nanmean(eegdata[:, chans, st + win // 2 : st + win], axis=2)
                 reject = np.abs(first_half - last_half) > threshold
-                reject = reject.filled(False)  # fill masked values with False so they aren't rejected
+                if hasattr(reject, "mask"):
+                    reject = reject.filled(False)  # fill masked values with False so they aren't rejected
                 rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], reject)
 
         # if both eyes are recorded, then ONLY mark artifacts if they appear in both eyes
@@ -803,14 +805,19 @@ class Preprocess:
 
         for itrial in range(eegdata.shape[0]):
             trial_data = eegdata[itrial]
-            trial_data = trial_data[
-                :, ~trial_data.mask.any(0)
-            ].filled()  # take out masked timepoints bc don't play nice with linear regression
+            if hasattr(trial_data, "mask"):
+                trial_data = trial_data[
+                    :, ~trial_data.mask.any(0)
+                ].filled()  # take out masked timepoints bc don't play nice with linear regression
             xs = np.arange(trial_data.shape[1])
             A = np.vstack([xs, np.ones(len(xs))]).T
             (slopes[itrial], _), ssrs[itrial], _, _ = np.linalg.lstsq(A, trial_data.T, rcond=None)
 
-        r2s = 1 - ssrs / (eegdata.shape[2] * eegdata.var(axis=2)).filled()  # double check value for n
+        if hasattr(trial_data, "mask"):
+            r2s = 1 - ssrs / (eegdata.shape[2] * eegdata.var(axis=2)).filled()  # double check value for n
+        else:
+            r2s = 1 - ssrs / (eegdata.shape[2] * eegdata.var(axis=2))  # double check value for n
+
         rej_linear[:, chans] = np.logical_and(r2s > min_r2, slopes > min_slope)
         return rej_linear
 
@@ -843,8 +850,7 @@ class Preprocess:
                     np.where(  # find the indices of non-flat moments
                         np.concatenate(
                             # add True to the beginning and end of the array, to avoid unbounded runs of flats
-                            # also converts masked values to True, so they are non considered flat
-                            ([True], non_flats.filled(True), [True])
+                            ([True], non_flats, [True])
                         )
                     )[0]
                 )
@@ -864,6 +870,11 @@ class Preprocess:
 
                 diff = np.diff(eegdata[:, chans], axis=2)
                 non_flats = (diff < -threshold) | (diff > threshold)
+                if hasattr(non_flats, "mask"):
+
+                    non_flats = non_flats.filled(
+                        True
+                    )  # converts masked values to True, so they are non considered flat
 
                 rej_chans[:, chans] = rej_chans[:, chans] | np.apply_along_axis(
                     get_flatline, 2, non_flats
