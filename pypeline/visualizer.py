@@ -33,6 +33,7 @@ class Visualizer:
         load_flags: bool = True,
         port_codes_show: list | None = None,  # list of port codes to show, if None then all are shown
     ):
+
         self.sub = sub
         self.parent_dir = parent_dir
         self.experiment_name = experiment_name
@@ -67,10 +68,22 @@ class Visualizer:
         self.events = pd.read_csv(self.data_path.fpath, sep="\t")
 
         ## EEG Port codes from metadata
+        if port_codes_show is None:
+            events_show = list(self.epochs_obj.event_id.keys())  # show all port codes
+        else:
+            events_show = []
+            for code in port_codes_show:
+                if code in self.epochs_obj.event_id.keys():
+                    events_show.append(code)
+                elif code in self.epochs_obj.event_id.values():
+                    events_show.append(
+                        list(self.epochs_obj.event_id.keys())[list(self.epochs_obj.event_id.values()).index(code)]
+                    )  # get corresponding event id
+
         self.all_port_codes = []
         self.all_portcode_times = []
         for _, row in self.epochs_obj.metadata.iterrows():
-            row = row.dropna()
+            row = row[events_show].dropna()  # only keep events we want to display
             row = row[np.logical_and(row > self.trial_start, row < self.trial_end)]
             row.sort_values(inplace=True)
             self.all_port_codes.append(
