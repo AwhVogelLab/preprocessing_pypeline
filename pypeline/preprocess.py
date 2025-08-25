@@ -14,23 +14,29 @@ FILTER_FREQS = (0, 80)  # low, high
 
 
 class Preprocess:
+
     def __init__(
         self,
         data_dir: str,  # where you keep datasets
         root_dir: str,  # location of RAW data
         trial_start: float,  # start of trial (ms)
         trial_end: float,  # end of trial (ms)
-        stim_conditions: list,  # valid condition labels
-        timelock_ix: int,  # which position to timelock to (in event_code_dict)
-        event_dict: dict,  # event name: code mapping
+        event_dict: dict,  # event name: code mapping. ONLY events in data
         event_code_dict: dict,  # event code: sequence mapping
-        filter_freqs=FILTER_FREQS,  # frequencies for bandpass filtering
-        srate: int = None,  # data sampling rate (Hz)
+        timelock_ix: (
+            int | dict | None
+        ) = None,  # Where to timelock in event_code dict. Can either be an int (same for all events) or a dict with event codes as keys and indices as values.
+        # If None, will use the first occurrence of each event code in event_code_dict
+        filter_freqs: tuple[
+            None | int | float, None | int | float
+        ] = FILTER_FREQS,  # frequencies for bandpass filtering
+        srate: int | None = None,  # data sampling rate (Hz)
         no_et_spaces: bool = True,  # are there spaces in the eyetracking file?
-        event_names: dict = None,  # names of each annotation
-        baseline_time=None,  # times for baselining
-        rejection_time=(None, None),  # times to do rejection
-        drop_channels=None,  # channels to drop outright (not recommendedd)
+        event_names: dict | None = None,  # names of each condition code. Can take custom events (not in data)
+        baseline_time: tuple[float, float] | None = None,  # times for baselining
+        rejection_time: tuple[float, float] | None = None,  # times to do rejection
+        reject_between_codes: tuple | None = None,  # reject trials between these codes
+        drop_channels=None,  # channels to drop outright (not recommended)
         experiment_name=None,  # name of your experiment
     ):
 
@@ -40,7 +46,7 @@ class Preprocess:
         self.trial_start_t = trial_start
         self.trial_end_t = trial_end
         self.event_dict = event_dict
-        self.stim_conditions = stim_conditions
+        self.event_dict_inv = {v: k for k, v in event_dict.items()}  # invert for later use
         self.event_code_dict = event_code_dict
         self.event_names = event_names if event_names is not None else event_dict
         self.event_names.update(  # these occasionally appear
@@ -49,13 +55,59 @@ class Preprocess:
                 "New Segment/LostSamples: 2": 10001,
             }
         )
-        self.timelock_ix = timelock_ix
+
+        if type(timelock_ix) is dict:
+            self.timelock_ix = timelock_ix
+        elif type(timelock_ix) is int:
+            self.timelock_ix = {k: timelock_ix for k in self.event_code_dict.keys()}
+        elif timelock_ix is None:
+            self.timelock_ix = {k: v.index(k) for k, v in event_code_dict.items()}
+        else:
+            raise TypeError(
+                "timelock_ix must be either an int, a dict with event codes as keys and indices as values, or None"
+            )
+
         self.filter_freqs = filter_freqs
         self.no_et_spaces = no_et_spaces
         self.baseline_time = baseline_time
-        rejection_time[0] = trial_start if rejection_time[0] is None else rejection_time[0]
-        rejection_time[1] = trial_end if rejection_time[1] is None else rejection_time[1]
-        self.rejection_time = rejection_time
+
+        if rejection_time is not None and reject_between_codes is not None:
+            raise ValueError("You cannot specify both rejection_time and reject_between_codes")
+
+        elif rejection_time is not None:
+            # check time is valid
+
+            if rejection_time[0] is None and rejection_time[1] is not None:
+                self.rejection_time = (trial_start, rejection_time[1])
+            elif rejection_time[0] is not None and rejection_time[1] is None:
+                self.rejection_time = (rejection_time[0], trial_end)
+            elif rejection_time[0] is None and rejection_time[1] is None:
+                # for backwards compatibility
+                self.rejection_time = (trial_start, trial_end)
+            else:
+                self.rejection_time = rejection_time
+
+            # checking for invalid values
+            if len(rejection_time) != 2:
+                raise ValueError("rejection_time must be a tuple of length 2")
+            if rejection_time[0] >= rejection_time[1]:
+                raise ValueError("rejection_time[0] must be less than rejection_time[1]")
+            if rejection_time[0] < trial_start or rejection_time[1] > trial_end:
+                raise ValueError("rejection_time must be within the trial time range")
+
+            self.rejection_codes = None
+
+        elif reject_between_codes is not None:
+            if len(reject_between_codes) != 2:
+                raise ValueError("reject_between_codes must be a tuple of length 2")
+            if reject_between_codes[0] not in event_dict.values() or reject_between_codes[1] not in event_dict.values():
+                raise ValueError("inputs to reject_between_codes must be valid event codes")
+            self.rejection_codes = reject_between_codes
+            self.rejection_time = None
+
+        else:
+            self.rejection_time = (trial_start, trial_end)
+
         self.drop_channels = drop_channels
         self.experiment_name = experiment_name
 
@@ -94,7 +146,8 @@ class Preprocess:
                 events = pd.read_csv(bids_path.copy().update(suffix="events", extension=".tsv").fpath, sep="\t")
 
                 return eegdata, events
-            except FileNotFoundError:
+            except FileNotFoundError as e:
+                print(e)
                 print("Could not find EEG data in your directory. I will try to import it from the raw data")
 
         subject_dir = os.path.join(self.root_dir, subject_number)
@@ -180,6 +233,16 @@ class Preprocess:
             if "_data" in f:
                 pd.read_csv(f).to_csv(path.fpath, sep="\t")
 
+    def _remove_eyetrack_spaces(self, input_file, output_file):
+        """Removes spaces and saccades from asc file"""
+        with open(input_file, "r") as f:
+            lines = f.readlines()
+        newlines = np.array(lines)[
+            [l != "\n" and "ESACC" not in l and "EFIX" not in l for l in lines]
+        ]  # it breaks with empty lines or saccades, so delete these
+        with open(output_file, "w") as f:
+            f.writelines(newlines)
+
     def import_eyetracker(self, subject_number, keyword=None, overwrite=False):
         """Loads in eyetracking data for a subject
 
@@ -213,8 +276,7 @@ class Preprocess:
                 if len(asc_file) == 0:
                     raise FileNotFoundError("No .asc file. I will try to re-import the data")
                 elif len(asc_file) == 1:
-                    asc_file = os.path.join(subject_dir, asc_file[0])
-                    eye = mne.io.read_raw_eyelink(asc_file, create_annotations=["blinks", "messages"])
+                    eye = mne.io.read_raw_eyelink(path.fpath, create_annotations=["blinks", "messages"])
 
                 else:
                     print(
@@ -222,19 +284,20 @@ class Preprocess:
                     )
                     raws = []
                     for ifile, file in enumerate(asc_file):
-                        file = os.path.join(subject_dir, file)
+                        file = os.path.join(path.fpath.parent, file)
                         ascpath = path.copy().update(split=ifile + 1)
                         raws.append(mne.io.read_raw_eyelink(file, create_annotations=["blinks", "messages"]))
                     eye = mne.concatenate_raws(raws)
 
                 # events should be already saved regardless
                 path.update(suffix="events", extension=".tsv")
-                eye_events = pd.read_csv(path.fpath, sep="\t", index=False)
+                eye_events = pd.read_csv(path.fpath, sep="\t", index_col=False)
 
                 return eye, eye_events
 
-            except FileNotFoundError:
-                print("Could not find EEG data in your directory. I will try to import it from the raw data")
+            except FileNotFoundError as e:
+                print(e)
+                print("Could not find Eyetracking data in your directory. I will try to import it from the raw data")
 
         path.mkdir()
 
@@ -251,7 +314,7 @@ class Preprocess:
             if self.no_et_spaces:
                 shutil.copy2(asc_file, path.fpath)
             else:
-                self.remove_eyetrack_spaces(asc_file, path.fpath)
+                self._remove_eyetrack_spaces(asc_file, path.fpath)
 
             # load in eye tracker data
             eye = mne.io.read_raw_eyelink(path.fpath, create_annotations=["blinks", "messages"])
@@ -267,7 +330,7 @@ class Preprocess:
                 if self.no_et_spaces:
                     shutil.copy2(file, ascpath.fpath)
                 else:
-                    self.remove_eyetrack_spaces(file, ascpath.fpath)
+                    self._remove_eyetrack_spaces(file, ascpath.fpath)
 
                 try:
                     raws.append(mne.io.read_raw_eyelink(ascpath.fpath, create_annotations=["blinks", "messages"]))
@@ -325,12 +388,72 @@ class Preprocess:
 
         return eye, eye_events
 
-    def convert_bids_events(self, events):
+    def _convert_bids_events(self, events):
         """
         Converts a BIDS events file to a mne events array
         of the form [sample,0,value]
         """
         return events[["sample", "duration", "value"]].to_numpy().astype(int)
+
+    def _filter_events(self, events):
+
+        class NoCode(Exception):
+            pass
+
+        # iterates through the list of event lists, requiring it to match the sequence in required_event_order
+        # only picks out the first stimulus
+        new_events = []
+        new_times = []
+        lock_events = []
+        lock_times = []
+        for i in range(len(events)):
+            for code, sequence in self.event_code_dict.items():
+                try:
+                    for j, ev in enumerate(sequence):  # loop through the sequence and check if all events match
+                        if events[i + j, 2] != ev:
+                            raise NoCode
+                except NoCode:
+                    continue  # not met, re loop
+                except IndexError:
+                    break  # end of events array
+
+                else:
+
+                    lock_events.append(code)  # good for eyetracking, only keep events we are locking to
+                    lock_times.append(events[i + self.timelock_ix[code], 0])
+
+                    cond_events = events[i : i + len(sequence), 2]
+                    cond_events[self.timelock_ix[code]] = code  # replace the timelock event with the assigned code
+
+                    new_events.append(cond_events)
+                    new_times.append(events[i : i + len(sequence), 0])
+
+        new_events = np.concatenate(new_events)
+        new_times = np.concatenate(new_times)
+        filtered_events = np.stack((new_times, np.zeros(len(new_times)), new_events), axis=1).astype(int)
+        filtered_timelock_events = np.stack((lock_times, np.zeros(len(lock_times)), lock_events), axis=1).astype(int)
+
+        return filtered_timelock_events, filtered_events
+
+    def _make_metadata_from_events(self, events, srate):
+
+        trial_keys = np.vectorize(self.event_dict_inv.get)(
+            np.unique(np.concatenate([v for v in self.event_code_dict.values()]))
+        )
+        row_events = [self.event_dict_inv[k] for k in self.event_code_dict.keys()]
+
+        metadata, metadata_events, meta_id = mne.epochs.make_metadata(
+            events,
+            self.event_dict,
+            tmin=self.trial_start_t,
+            tmax=self.trial_end_t * 2,  # double the time to account for delay end / long response
+            sfreq=srate,
+            row_events=row_events,
+        )
+
+        metadata = metadata[trial_keys]  # limit to events appearing in the trial
+
+        return metadata, metadata_events
 
     def make_eeg_epochs(self, eeg, eeg_events, eeg_trials_drop=None):
         """
@@ -351,8 +474,9 @@ class Preprocess:
             self.srate = eeg.info["sfreq"]
 
         # convert event dataframe to mne format (array of sample, duration, value)
-        eeg_events = self.convert_bids_events(eeg_events)
-        eeg_events = self.filter_events(eeg_events)
+        eeg_events = self._convert_bids_events(eeg_events)
+        _, eeg_events = self._filter_events(eeg_events)
+        metadata, metadata_events = self._make_metadata_from_events(eeg_events, eeg.info["sfreq"])
 
         # get EEG epochs object
         assert eeg.info["sfreq"] % self.srate == 0
@@ -360,14 +484,13 @@ class Preprocess:
 
         epochs = mne.Epochs(
             eeg,
-            eeg_events,
+            metadata_events,
             self.event_dict,
             tmin=self.trial_start_t,
             tmax=self.trial_end_t,
             on_missing="ignore",
+            metadata=metadata,
             baseline=self.baseline_time,
-            reject_tmin=self.rejection_time[0],
-            reject_tmax=self.rejection_time[1],
             preload=True,
             decim=decim,
         ).drop(
@@ -413,12 +536,14 @@ class Preprocess:
         # get our events list
         unmatched_codes = list(set(eeg_events["value"].unique()) ^ set(eye_events["value"].unique()))
         # convert event dataframe to mne format (array of sample, duration, value)
-        eeg_events = self.convert_bids_events(eeg_events)
-        eye_events = self.convert_bids_events(eye_events)
+        eeg_events = self._convert_bids_events(eeg_events)
+        eye_events = self._convert_bids_events(eye_events)
         eeg_events = eeg_events[~np.isin(eeg_events, unmatched_codes).any(axis=1)]
         eye_events = eye_events[~np.isin(eye_events, unmatched_codes).any(axis=1)]
-        eeg_events = self.filter_events(eeg_events)
-        eye_events = self.filter_events(eye_events)
+        _, eeg_events = self._filter_events(eeg_events)  # get all events
+        eye_events, _ = self._filter_events(eye_events)  # only get events we timelock to
+
+        metadata, metadata_events = self._make_metadata_from_events(eeg_events, eeg.info["sfreq"])  # only from EEG data
 
         # get EEG epochs object
         assert eeg.info["sfreq"] % self.srate == 0
@@ -426,14 +551,13 @@ class Preprocess:
 
         eeg_epochs = mne.Epochs(
             eeg,
-            eeg_events,
+            metadata_events,
             self.event_dict,
             tmin=self.trial_start_t,
             tmax=self.trial_end_t,
             on_missing="ignore",
+            metadata=metadata,
             baseline=self.baseline_time,
-            reject_tmin=self.rejection_time[0],
-            reject_tmax=self.rejection_time[1],
             preload=True,
             decim=decim,
         ).drop(
@@ -485,17 +609,7 @@ class Preprocess:
 
         return epochs
 
-    def remove_eyetrack_spaces(self, input_file, output_file):
-        """Removes spaces and saccades from asc file"""
-        with open(input_file, "r") as f:
-            lines = f.readlines()
-        newlines = np.array(lines)[
-            [l != "\n" and "ESACC" not in l and "EFIX" not in l for l in lines]
-        ]  # it breaks with empty lines or saccades, so delete these
-        with open(output_file, "w") as f:
-            f.writelines(newlines)
-
-    def check_both_eyes(self, chan_labels, rej_chans):
+    def _check_both_eyes(self, chan_labels, rej_chans):
         """
         If an artifact is found in eyetracking channels, ensures that it is found in both eyes
             chan_labels: list of all channel labels
@@ -517,20 +631,41 @@ class Preprocess:
             ]
         return rej_chans
 
-    def get_data_from_rej_period(self, epochs):
+    def _get_data_from_rej_period(self, epochs):
         """
         grab the data from the rejection period, which might be smaller than epoch length
         """
-        return epochs.get_data(copy=True)[
-            :,
-            :,
-            np.logical_and(
-                epochs.times >= self.rejection_time[0],
-                epochs.times <= self.rejection_time[1],
-            ),
-        ]
 
-    def conv_ms_to_samples(self, dur, epochs):
+        if self.rejection_time is not None:
+            return epochs.get_data(copy=True)[
+                :,
+                :,
+                np.logical_and(
+                    epochs.times >= self.rejection_time[0],
+                    epochs.times <= self.rejection_time[1],
+                ),
+            ]
+
+        elif self.rejection_codes is not None:  # use rejection codes and return a masked array
+
+            rejection_start_code = self.event_dict_inv[self.rejection_codes[0]]
+            rejection_end_code = self.event_dict_inv[self.rejection_codes[1]]
+            rejection_time_ix = ~np.logical_and(
+                epochs.times[:, np.newaxis] > epochs.metadata[rejection_start_code].to_numpy(),
+                epochs.times[:, np.newaxis] < epochs.metadata[rejection_end_code].to_numpy(),
+            ).T  # trials x timepoints matrix of times to reject within. Inverted (because masking will mask these)
+
+            epoch_data = epochs.get_data(copy=True)
+            rejection_time_ix = np.broadcast_to(
+                rejection_time_ix[:, np.newaxis, :], (epoch_data.shape)
+            )  # broadcast to match shape. Yes this is necessary
+
+            return np.ma.masked_array(epoch_data, mask=rejection_time_ix)
+
+        else:
+            return epochs.get_data(copy=True)
+
+    def _conv_ms_to_samples(self, dur, epochs):
         """
         convert a duration in ms to timepoints
         """
@@ -540,7 +675,7 @@ class Preprocess:
         """
         Rejects trials that contain any nan values
         """
-        eegdata = self.get_data_from_rej_period(epochs)
+        eegdata = self._get_data_from_rej_period(epochs)
         return np.any(np.isnan(eegdata), 2)
 
     def artreject_slidingP2P(self, epochs, rejection_criteria, win=200, win_step=100):
@@ -554,11 +689,11 @@ class Preprocess:
             rej_chans: indicates which electrodes match automated rejection criteria
         """
 
-        eegdata = self.get_data_from_rej_period(epochs)
+        eegdata = self._get_data_from_rej_period(epochs)
         chan_types = np.array(epochs.info.get_channel_types())
 
-        win = self.conv_ms_to_samples(win, epochs)
-        win_step = self.conv_ms_to_samples(win_step, epochs)
+        win = self._conv_ms_to_samples(win, epochs)
+        win_step = self._conv_ms_to_samples(win_step, epochs)
 
         if isinstance(win, int):
             win_starts = np.arange(0, eegdata.shape[2] - win, win_step)
@@ -576,10 +711,13 @@ class Preprocess:
             for st in win_starts:
                 data_min = np.nanmin(eegdata[:, chans, st : st + win], axis=2)
                 data_max = np.nanmax(eegdata[:, chans, st : st + win], axis=2)
-                rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], (data_max - data_min) > threshold)
+                reject = (data_max - data_min) > threshold
+                if hasattr(reject, "mask"):
+                    reject = reject.filled(False)  # fill masked values with False so they aren't rejected
+                rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], reject)
 
         # if both eyes are recorded, then ONLY mark artifacts if they appear in both eyes
-        rej_chans = self.check_both_eyes(epochs.ch_names, rej_chans)
+        rej_chans = self._check_both_eyes(epochs.ch_names, rej_chans)
 
         return rej_chans
 
@@ -593,7 +731,7 @@ class Preprocess:
             rej_chans: indicates which electrodes match automated rejection criteria
         """
 
-        eegdata = self.get_data_from_rej_period(epochs)
+        eegdata = self._get_data_from_rej_period(epochs)
         chan_types = np.array(epochs.info.get_channel_types())
         rej_chans = np.full((eegdata.shape[0:2]), False)
 
@@ -606,7 +744,7 @@ class Preprocess:
             rej_chans[:, chans] = np.logical_or(data_max > threshold, data_min < -1 * threshold)
 
         # if both eyes are recorded, then ONLY mark artifacts if they appear in both eyes
-        rej_chans = self.check_both_eyes(epochs.ch_names, rej_chans)
+        rej_chans = self._check_both_eyes(epochs.ch_names, rej_chans)
 
         return rej_chans
 
@@ -621,11 +759,11 @@ class Preprocess:
             rej_chans: indicates which electrodes match automated rejection criteria
         """
 
-        eegdata = self.get_data_from_rej_period(epochs)
+        eegdata = self._get_data_from_rej_period(epochs)
         chan_types = np.array(epochs.info.get_channel_types())
 
-        win = self.conv_ms_to_samples(win, epochs)
-        win_step = self.conv_ms_to_samples(win_step, epochs)
+        win = self._conv_ms_to_samples(win, epochs)
+        win_step = self._conv_ms_to_samples(win_step, epochs)
 
         win_starts = np.arange(0, eegdata.shape[2] - win, win_step)
         rej_chans = np.full((eegdata.shape[0:2]), False)
@@ -637,10 +775,13 @@ class Preprocess:
 
                 first_half = np.nanmean(eegdata[:, chans, st : st + win // 2], axis=2)
                 last_half = np.nanmean(eegdata[:, chans, st + win // 2 : st + win], axis=2)
-                rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], np.abs(first_half - last_half) > threshold)
+                reject = np.abs(first_half - last_half) > threshold
+                if hasattr(reject, "mask"):
+                    reject = reject.filled(False)  # fill masked values with False so they aren't rejected
+                rej_chans[:, chans] = np.logical_or(rej_chans[:, chans], reject)
 
         # if both eyes are recorded, then ONLY mark artifacts if they appear in both eyes
-        rej_chans = self.check_both_eyes(epochs.ch_names, rej_chans)
+        rej_chans = self._check_both_eyes(epochs.ch_names, rej_chans)
 
         return rej_chans
 
@@ -654,28 +795,30 @@ class Preprocess:
             min_r2 (float, optional): minimum r2 to reject at. Defaults to 0.3.
         """
 
-        eegdata = self.get_data_from_rej_period(epochs)
+        eegdata = self._get_data_from_rej_period(epochs)
+        rej_linear = np.full((eegdata.shape[0:2]), False)  # assign to all channels first
         chans = np.array(epochs.info.get_channel_types()) == "eeg"  # TODO: make more flexible?
+        eegdata = eegdata[:, chans, :]  # only keep EEG channels
 
-        # Note, using times from the epochs object means that slope will always be in V/S units
-        xs = epochs.times[
-            np.logical_and(
-                epochs.times >= self.rejection_time[0],
-                epochs.times <= self.rejection_time[1],
-            )
-        ]
-
-        A = np.vstack([xs, np.ones(len(xs))]).T
         slopes = np.full((eegdata.shape[0:2]), 0, dtype=float)
         ssrs = np.full((eegdata.shape[0:2]), 0, dtype=float)
 
         for itrial in range(eegdata.shape[0]):
-            (slopes[itrial, chans], _), ssrs[itrial, chans], _, _ = np.linalg.lstsq(
-                A, eegdata[itrial, chans].T, rcond=None
-            )
+            trial_data = eegdata[itrial]
+            if hasattr(trial_data, "mask"):
+                trial_data = trial_data[
+                    :, ~trial_data.mask.any(0)
+                ].filled()  # take out masked timepoints bc don't play nice with linear regression
+            xs = np.arange(trial_data.shape[1])
+            A = np.vstack([xs, np.ones(len(xs))]).T
+            (slopes[itrial], _), ssrs[itrial], _, _ = np.linalg.lstsq(A, trial_data.T, rcond=None)
 
-        r2s = 1 - ssrs / (eegdata.shape[2] * eegdata.var(axis=2))  # double check value for n
-        rej_linear = np.logical_and(r2s > min_r2, slopes > min_slope)
+        if hasattr(trial_data, "mask"):
+            r2s = 1 - ssrs / (eegdata.shape[2] * eegdata.var(axis=2)).filled()  # double check value for n
+        else:
+            r2s = 1 - ssrs / (eegdata.shape[2] * eegdata.var(axis=2))  # double check value for n
+
+        rej_linear[:, chans] = np.logical_and(r2s > min_r2, slopes > min_slope)
         return rej_linear
 
     def artreject_flatline(self, epochs, rejection_criteria, flatline_duration=200):
@@ -690,7 +833,7 @@ class Preprocess:
             rej_chans: indicates which electrodes match automated rejection criteria
         """
 
-        duration = self.conv_ms_to_samples(flatline_duration, epochs)
+        duration = self._conv_ms_to_samples(flatline_duration, epochs)
 
         def get_flatline(non_flats, duration=duration):
             """
@@ -706,14 +849,15 @@ class Preprocess:
                 np.diff(  # see if the gap between indices is bigger than the duration
                     np.where(  # find the indices of non-flat moments
                         np.concatenate(
+                            # add True to the beginning and end of the array, to avoid unbounded runs of flats
                             ([True], non_flats, [True])
-                        )  # add True to the beginning and end of the array, to avoid unbounded runs of flats
+                        )
                     )[0]
                 )
                 >= duration
             )
 
-        eegdata = self.get_data_from_rej_period(epochs)
+        eegdata = self._get_data_from_rej_period(epochs)
         chan_types = np.array(epochs.info.get_channel_types())
         rej_chans = np.full((eegdata.shape[0:2]), False)
 
@@ -726,40 +870,19 @@ class Preprocess:
 
                 diff = np.diff(eegdata[:, chans], axis=2)
                 non_flats = (diff < -threshold) | (diff > threshold)
+                if hasattr(non_flats, "mask"):
+
+                    non_flats = non_flats.filled(
+                        True
+                    )  # converts masked values to True, so they are non considered flat
 
                 rej_chans[:, chans] = rej_chans[:, chans] | np.apply_along_axis(
                     get_flatline, 2, non_flats
                 )  # apply the function to each trial
 
-        rej_chans = self.check_both_eyes(epochs.ch_names, rej_chans)
+        rej_chans = self._check_both_eyes(epochs.ch_names, rej_chans)
 
         return rej_chans
-
-    def filter_events(self, events):
-
-        class NoCode(Exception):
-            pass
-
-        # iterates through the list of event lists, requiring it to match the sequence in required_event_order
-        # only picks out the first stimulus
-        new_events = []
-        new_times = []
-        for i in range(len(events)):
-            for code, sequence in self.event_code_dict.items():
-                try:
-                    for j, ev in enumerate(sequence):
-                        if events[i + j, 2] != ev:
-                            raise NoCode
-                except NoCode:
-                    continue
-                except IndexError:
-                    break
-
-                else:
-                    new_events.append(code)
-                    new_times.append(events[i + self.timelock_ix, 0])
-        new_event_list = np.stack((new_times, np.zeros(len(new_times)), new_events), axis=1).astype(int)
-        return new_event_list
 
     def deg2pix(self, eyeMoveThresh=1, distFromScreen=800, monitorWidth=532, screenResX=1920):
         """Converts degrees visual angle to a pixel value
@@ -809,8 +932,7 @@ class Preprocess:
         # EVENTS
 
         events_final = pd.DataFrame(epochs.events, columns=["sample", "duration", "value"])
-        event_dict_inv = {v: k for k, v in self.event_dict.items()}
-        get_events = lambda trl: event_dict_inv[trl["value"]]
+        get_events = lambda trl: self.event_dict_inv[trl["value"]]
         events_final["trial_type"] = events_final.apply(get_events, axis=1)
         events_final["onset"] = events_final["sample"] / self.srate
         events_final = events_final[["onset", "duration", "trial_type", "value", "sample"]]
