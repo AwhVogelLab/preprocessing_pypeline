@@ -272,7 +272,7 @@ class Preprocess:
 
         if not overwrite:
             try:
-                asc_file = glob("*.asc", root_dir=path.fpath.parent)
+                asc_file = sorted(glob("*.asc", root_dir=path.fpath.parent))
                 if len(asc_file) == 0:
                     raise FileNotFoundError("No .asc file. I will try to re-import the data")
                 elif len(asc_file) == 1:
@@ -303,7 +303,7 @@ class Preprocess:
 
         # COPY MAIN ASC FILE (with spaces removed)
 
-        asc_file = glob("*.asc", root_dir=subject_dir)
+        asc_file = sorted(glob("*.asc", root_dir=subject_dir))
         if len(asc_file) == 0:
             raise FileNotFoundError("No .asc file. Are you sure you remembered to convert it?")
             # TODO: automatically convert edf files
