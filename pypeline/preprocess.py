@@ -501,7 +501,7 @@ class Preprocess:
 
         return epochs
 
-    def make_and_sync_epochs(
+    def _make_and_prep_sync_of_epochs(
         self,
         eeg,
         eeg_events,
@@ -511,8 +511,9 @@ class Preprocess:
         eye_trials_drop=None,
     ):
         """
-        Function that does basic epoching
+        Helper Function that does basic epoching
         converts EEG and eyetracking raw objects into epochs
+        Returns the epochs for both EEG and eyetracking, along with their event codes, to confirm syncing
 
         Args:
             eeg: mne raw object containing EEG data
@@ -523,9 +524,13 @@ class Preprocess:
             eye_trials_drop: trials to drop from eyetracking
 
         Returns:
-            epochs: mne epochs object containing combined data
+            eeg_epochs: mne epochs object containing eeg data
+            eye_epochs: mne epochs object containing eye data
+            eeg_events: events structure containing condition codes for EEG data
+            eye_events: events structure containing condition codes for eye data
 
         """
+
         if eeg_trials_drop is None:
             eeg_trials_drop = []
         if eye_trials_drop is None:
@@ -598,6 +603,37 @@ class Preprocess:
             print(f"Dropping Eyetracking trials: {dropped_eeg_trials}")
             eeg_epochs.drop(dropped_eye_trials)
             eye_epochs.drop(dropped_eeg_trials)
+
+        return eeg_epochs, eye_epochs, eeg_events, eye_events
+
+    def make_and_sync_epochs(
+        self,
+        eeg,
+        eeg_events,
+        eye,
+        eye_events,
+        eeg_trials_drop=None,
+        eye_trials_drop=None,
+    ):
+        """
+        Function that does basic epoching
+        converts EEG and eyetracking raw objects into epochs
+
+        Args:
+            eeg: mne raw object containing EEG data
+            eeg_events: events structure containing condition codes. These should match the eyetracking conditions
+            eye: mne raw object containing eyetracking data
+            eye_events: events structure containing condition codes. These should match the EEG conditions
+            eeg_trials_drop: trials to drop from EEG
+            eye_trials_drop: trials to drop from eyetracking
+
+        Returns:
+            epochs: mne epochs object containing combined data
+
+        """
+        eeg_epochs, eye_epochs, _, _ = self._make_and_prep_sync_of_epochs(
+            eeg, eeg_events, eye, eye_events, eeg_trials_drop, eye_trials_drop
+        )
 
         try:
             epochs = eeg_epochs.copy()
