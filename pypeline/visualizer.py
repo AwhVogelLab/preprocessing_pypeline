@@ -83,7 +83,9 @@ class Visualizer:
         self.all_port_codes = []
         self.all_portcode_times = []
         for _, row in self.epochs_obj.metadata.iterrows():
-            row = row[events_show].dropna()  # only keep events we want to display
+            keep_events = np.intersect1d(events_show, row.index)
+
+            row = row[keep_events].dropna()  # only keep events we want to display
             row = row[np.logical_and(row > self.trial_start, row < self.trial_end)]
             row.sort_values(inplace=True)
             self.all_port_codes.append(
