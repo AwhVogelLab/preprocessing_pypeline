@@ -215,7 +215,7 @@ class Preprocess:
 
         return eegdata, events
 
-    def import_behavior(self, subject_number):
+    def import_behavior(self, subject_number, suffix="_data.csv"):
         """
         Imports behavioral data into a BIDS-compatible TSV
         """
@@ -230,7 +230,7 @@ class Preprocess:
         )
         path.mkdir()
         for f in glob(os.path.join(self.root_dir, subject_number, "*.csv")):
-            if "_data" in f:
+            if f.endswith(suffix):
                 pd.read_csv(f).to_csv(path.fpath, sep="\t")
 
     def _remove_eyetrack_spaces(self, input_file, output_file):
