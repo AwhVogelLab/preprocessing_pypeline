@@ -22,14 +22,14 @@ class Visualizer:
         self,
         sub,
         parent_dir: str,
-        srate: float,
         experiment_name: str,
-        rejection_time: list[float | None, float | None] = [None, None],
+        srate: float | None = None,
+        rejection_time: list[float | None] = [None, None],
         win_step: int = SLIDER_STEP,
         downscale: dict = {"eyegaze": EYETRACK_SCALE},
         chan_offset: float = CHAN_OFFSET,
-        channels_drop: list = None,
-        channels_ignore: list = None,
+        channels_drop: list | None = None,
+        channels_ignore: list | None = None,
         load_flags: bool = True,
         port_codes_show: list | None = None,  # list of port codes to show, if None then all are shown
     ):
@@ -37,7 +37,6 @@ class Visualizer:
         self.sub = sub
         self.parent_dir = parent_dir
         self.experiment_name = experiment_name
-        self.srate = srate
         self.win_step = win_step
 
         self.rejection_time = rejection_time
@@ -55,6 +54,8 @@ class Visualizer:
 
         self.data_path.update(suffix="eeg", extension=".fif")  # load in preprocessed data
         self.epochs_obj = mne.read_epochs(self.data_path.fpath)
+
+        self.srate = self.epochs_obj.info["sfreq"] if srate is None else srate
 
         # get trial start and end time from epochs object
         self.trial_start = self.epochs_obj.times[0]

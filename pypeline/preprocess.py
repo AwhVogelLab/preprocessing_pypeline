@@ -337,7 +337,7 @@ class Preprocess:
                 except ValueError as e:
                     print(
                         f"Error reading {ascpath.fpath}. This may be due to a bug in mne if your eyetracking file"
-                        + "contains dropouts where the eye is lost. To fix this, manually re-generate the as files"
+                        + "contains dropouts where the eye is lost. To fix this, manually re-generate the asc files"
                         + "with 'Block Flags Output' checked"
                     )
                     raise e
