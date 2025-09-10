@@ -455,8 +455,7 @@ class Preprocess:
 
         return metadata, metadata_events
     
-    @staticmethod
-    def _get_tolerance(x, y):
+    def _get_tolerance(self,x, y):
         """
         helper function to find the first mismatch between two arrays of different lengths
         Args:
@@ -505,6 +504,7 @@ class Preprocess:
         return events_to_delete
     
 
+
     def _check_event_desyncs(self, eeg_events, eye_events, required_row_correct=10):
         """
         Check for desynchronization between EEG and eye-tracking events.
@@ -525,31 +525,40 @@ class Preprocess:
         elif len(eeg_events) == len(eye_events):
             raise RuntimeError("Event lists are the same length but do not match. Manual intervention is required.")
         elif len(eeg_events) > len(eye_events):
+            print("More EEG events than eye-tracking events. Checking for desyncs...")
             extra_eeg_events = len(eeg_events) - len(eye_events)
 
             # if extra eeg events at start remove those
             if self._get_tolerance(eeg_events[extra_eeg_events:], eye_events) == 0:
+                print(f"Removing first {extra_eeg_events} extra EEG events at the start")
                 return list(range(extra_eeg_events)), []
             # if extra eeg events at end remove those
             elif self._get_tolerance(eeg_events[:-extra_eeg_events], eye_events) == 0:
+                print(f"Removing last {extra_eeg_events} extra EEG events at the end")
                 return list(range(len(eeg_events) - extra_eeg_events, len(eeg_events))), []
             else:
                 events_to_drop = self._find_extra_events(eye_events, eeg_events, required_row_correct)
+                print(f"Removing extra EEG events at indices: {events_to_drop}")
                 return events_to_drop, []
         elif len(eye_events) > len(eeg_events):
+            print("More eye-tracking events than EEG events. Checking for desyncs...")
             extra_eye_events = len(eye_events) - len(eeg_events)
-
             # if extra eye events at start remove those
             if self._get_tolerance(eye_events[extra_eye_events:], eeg_events) == 0:
-                return [],list(range(extra_eye_events))
+                print(f"Removing first {extra_eye_events} extra eye events at the start")
+                return [], list(range(extra_eye_events))
             # if extra eye events at end remove those
             elif self._get_tolerance(eye_events[:-extra_eye_events], eeg_events) == 0:
-                return [],list(range(len(eye_events) - extra_eye_events, len(eye_events)))
+                print(f"Removing last {extra_eye_events} extra eye events at the end")
+                return [], list(range(len(eye_events) - extra_eye_events, len(eye_events)))
             else:
                 events_to_drop = self._find_extra_events(eeg_events, eye_events, required_row_correct)
+                print(f"Removing extra eye events at indices: {events_to_drop}")
                 return [], events_to_drop
         else:
             raise RuntimeError("Could not identify desyncs. Manual intervention is required.")
+
+
 
 
     def make_eeg_epochs(self, eeg, eeg_events, eeg_trials_drop=None):
