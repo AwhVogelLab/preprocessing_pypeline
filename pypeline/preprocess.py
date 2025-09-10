@@ -454,6 +454,103 @@ class Preprocess:
         metadata = metadata[trial_keys]  # limit to events appearing in the trial
 
         return metadata, metadata_events
+    
+    @staticmethod
+    def _get_tolerance(x, y):
+        """
+        helper function to find the first mismatch between two arrays of different lengths
+        Args:
+            x: shorter array
+            y: longer array
+        """
+        mismatches = 0
+        for itrial in range(len(x)):
+            if x[itrial] != y[itrial]:
+                mismatches += 1
+        return mismatches
+    def _find_extra_events(self, x, y, required_row_correct=10):
+        """
+        Helper function to identify sequences in one list that do not match the other.
+        y is the longer list, and events will be removed form it until it matches x
+        A better way to do this would use timestamps, but this is easier for now
+        Args:
+            x: shorter array
+            y: longer array
+            required_row_correct: how many events in a row must match to confirm the desync is fixed
+        """
+        reps = 0
+        y_short = y.copy()
+        events_to_delete = []
+        while self._get_tolerance(x, y_short) > 0:
+            reps += 1
+            if reps > 20:
+                raise RuntimeError("Could not find and fix all desyncs. Manual intervention is required.")
+            # find the first point at which x and y differ
+            for desync in range(len(x)):
+                if x[desync] != y_short[desync]:
+                    break
+            for irm in range(abs(len(y) - len(x))):
+                # check if removing irm events after the desync fixes the problem
+                # defined as if the next required_row_correct events match
+                tol = self._get_tolerance(
+                    x[desync : desync + required_row_correct],
+                    y_short[desync + irm + 1 : desync + irm + 1 + required_row_correct],
+                )
+                if tol == 0:
+                    # events to delete based on index in original y list
+                    mismatches = list(range(len(events_to_delete) + desync, len(events_to_delete) + desync + irm + 1))
+                    events_to_delete.extend(mismatches)
+                    y_short = np.delete(y, events_to_delete)
+                    break
+        return events_to_delete
+    
+
+    def _check_event_desyncs(self, eeg_events, eye_events, required_row_correct=10):
+        """
+        Check for desynchronization between EEG and eye-tracking events.
+        Args:
+            eeg_events: List of EEG events
+            eye_events: List of eye-tracking events
+            required_row_correct: Number of consecutive matching events required to confirm synchronization
+            - only used if extra events are not at only the start or end
+            note: this function assumes that the events are mostly synchronized, with only a few extra events in batches
+
+        Returns:
+            extra_eeg_events: Indices of extra EEG events to drop
+            extra_eye_events: Indices of extra eye-tracking events to drop
+        """
+
+        if self._get_tolerance(eeg_events, eye_events) == 0:
+            return [], []
+        elif len(eeg_events) == len(eye_events):
+            raise RuntimeError("Event lists are the same length but do not match. Manual intervention is required.")
+        elif len(eeg_events) > len(eye_events):
+            extra_eeg_events = len(eeg_events) - len(eye_events)
+
+            # if extra eeg events at start remove those
+            if self._get_tolerance(eeg_events[extra_eeg_events:], eye_events) == 0:
+                return list(range(extra_eeg_events)), []
+            # if extra eeg events at end remove those
+            elif self._get_tolerance(eeg_events[:-extra_eeg_events], eye_events) == 0:
+                return list(range(len(eeg_events) - extra_eeg_events, len(eeg_events))), []
+            else:
+                events_to_drop = self._find_extra_events(eye_events, eeg_events, required_row_correct)
+                return events_to_drop, []
+        elif len(eye_events) > len(eeg_events):
+            extra_eye_events = len(eye_events) - len(eeg_events)
+
+            # if extra eye events at start remove those
+            if self._get_tolerance(eye_events[extra_eye_events:], eeg_events) == 0:
+                return [],list(range(extra_eye_events))
+            # if extra eye events at end remove those
+            elif self._get_tolerance(eye_events[:-extra_eye_events], eeg_events) == 0:
+                return [],list(range(len(eye_events) - extra_eye_events, len(eye_events)))
+            else:
+                events_to_drop = self._find_extra_events(eeg_events, eye_events, required_row_correct)
+                return [], events_to_drop
+        else:
+            raise RuntimeError("Could not identify desyncs. Manual intervention is required.")
+
 
     def make_eeg_epochs(self, eeg, eeg_events, eeg_trials_drop=None):
         """
@@ -545,8 +642,14 @@ class Preprocess:
         eye_events = self._convert_bids_events(eye_events)
         eeg_events = eeg_events[~np.isin(eeg_events, unmatched_codes).any(axis=1)]
         eye_events = eye_events[~np.isin(eye_events, unmatched_codes).any(axis=1)]
-        _, eeg_events = self._filter_events(eeg_events)  # get all events
+        eeg_events_lock, eeg_events = self._filter_events(eeg_events)  # get all events
         eye_events, _ = self._filter_events(eye_events)  # only get events we timelock to
+
+
+        extra_eeg_trials, extra_eye_trials = self._check_event_desyncs(eeg_events_lock[:, 2], eye_events[:, 2])
+        eeg_trials_drop = list(set(eeg_trials_drop) | set(extra_eeg_trials))
+        eye_trials_drop = list(set(eye_trials_drop) | set(extra_eye_trials))
+
 
         metadata, metadata_events = self._make_metadata_from_events(eeg_events, eeg.info["sfreq"])  # only from EEG data
 
