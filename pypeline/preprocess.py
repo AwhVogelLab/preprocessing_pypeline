@@ -22,7 +22,7 @@ class Preprocess:
         trial_start: float,  # start of trial (ms)
         trial_end: float,  # end of trial (ms)
         event_dict: dict,  # event name: code mapping. ONLY events in data
-        event_code_dict: dict,  # event code: sequence mapping
+        event_code_dict: dict[int, list[int | list[int]]],  # event code: sequence mapping
         timelock_ix: (
             int | dict | None
         ) = None,  # Where to timelock in event_code dict. Can either be an int (same for all events) or a dict with event codes as keys and indices as values.
@@ -226,7 +226,7 @@ class Preprocess:
             datatype="beh",
             suffix="beh",
             extension=".tsv",
-            check="false",
+            check=False,
         )
         path.mkdir()
         for f in glob(os.path.join(self.root_dir, subject_number, "*.csv")):
@@ -410,7 +410,9 @@ class Preprocess:
             for code, sequence in self.event_code_dict.items():
                 try:
                     for j, ev in enumerate(sequence):  # loop through the sequence and check if all events match
-                        if events[i + j, 2] != ev:
+                        if isinstance(ev, int) and events[i + j, 2] != ev:
+                            raise NoCode
+                        elif isinstance(ev, list | tuple) and events[i + j, 2] not in ev:
                             raise NoCode
                 except NoCode:
                     continue  # not met, re loop
@@ -437,9 +439,14 @@ class Preprocess:
 
     def _make_metadata_from_events(self, events, srate):
 
-        trial_keys = np.vectorize(self.event_dict_inv.get)(
-            np.unique(np.concatenate([v for v in self.event_code_dict.values()]))
-        )
+        def flatten_list(l):
+            for it in l:
+                if isinstance(it, list):
+                    yield from flatten_list(it)
+                else:
+                    yield it
+
+        trial_keys = np.vectorize(self.event_dict_inv.get)(np.unique(list(flatten_list(self.event_code_dict.values()))))
         row_events = [self.event_dict_inv[k] for k in self.event_code_dict.keys()]
 
         metadata, metadata_events, meta_id = mne.epochs.make_metadata(
@@ -454,8 +461,8 @@ class Preprocess:
         metadata = metadata[trial_keys]  # limit to events appearing in the trial
 
         return metadata, metadata_events
-    
-    def _get_tolerance(self,x, y):
+
+    def _get_tolerance(self, x, y):
         """
         helper function to find the first mismatch between two arrays of different lengths
         Args:
@@ -467,6 +474,7 @@ class Preprocess:
             if x[itrial] != y[itrial]:
                 mismatches += 1
         return mismatches
+
     def _find_extra_events(self, x, y, required_row_correct=10):
         """
         Helper function to identify sequences in one list that do not match the other.
@@ -502,8 +510,6 @@ class Preprocess:
                     y_short = np.delete(y, events_to_delete)
                     break
         return events_to_delete
-    
-
 
     def _check_event_desyncs(self, eeg_events, eye_events, required_row_correct=10):
         """
@@ -557,9 +563,6 @@ class Preprocess:
                 return [], events_to_drop
         else:
             raise RuntimeError("Could not identify desyncs. Manual intervention is required.")
-
-
-
 
     def make_eeg_epochs(self, eeg, eeg_events, eeg_trials_drop=None):
         """
@@ -654,11 +657,9 @@ class Preprocess:
         eeg_events_lock, eeg_events = self._filter_events(eeg_events)  # get all events
         eye_events, _ = self._filter_events(eye_events)  # only get events we timelock to
 
-
         extra_eeg_trials, extra_eye_trials = self._check_event_desyncs(eeg_events_lock[:, 2], eye_events[:, 2])
         eeg_trials_drop = list(set(eeg_trials_drop) | set(extra_eeg_trials))
         eye_trials_drop = list(set(eye_trials_drop) | set(extra_eye_trials))
-
 
         metadata, metadata_events = self._make_metadata_from_events(eeg_events, eeg.info["sfreq"])  # only from EEG data
 
