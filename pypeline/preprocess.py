@@ -164,11 +164,12 @@ class Preprocess:
             )  # read into mne.raw structure
         elif len(vhdr_file) > 1:
             raws = []
+            print(
+                "More than 1 vhdr file present in subject directory. They will be concatenated in alphabetical order: ",
+                vhdr_file,
+            )
 
             for file in vhdr_file:
-                print(
-                    "More than 1 vhdr file present in subject directory. They will be concatenated in alphabetical order"
-                )
 
                 eegfile = os.path.join(subject_dir, file)  # search for vhdr file
                 raws.append(
@@ -230,8 +231,11 @@ class Preprocess:
         )
         path.mkdir()
         for f in glob(os.path.join(self.root_dir, subject_number, "*.csv")):
-            if "_data" in f:
-                pd.read_csv(f).to_csv(path.fpath, sep="\t")
+            if "_data" in f.split("/")[-1]:
+                try:
+                    pd.read_csv(f).to_csv(path.fpath, sep="\t")
+                except Exception as e:
+                    print(f"Failed to the following file to beh directory {f}: {e}")
 
     def _remove_eyetrack_spaces(self, input_file, output_file):
         """Removes spaces and saccades from asc file"""
