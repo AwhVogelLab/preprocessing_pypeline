@@ -167,9 +167,9 @@ class Visualizer:
         self.offset_dict = {
             "eeg": 0,
             "eog": chan_offset,
-            "eyegaze": chan_offset * 2,
-            "misc": chan_offset * 5,
-        }  # must be in order and increasing
+            "eyegaze": chan_offset,
+            "misc": chan_offset,
+        }  # must be in order and increasing in order to add spaces between channel types
 
         epochs_raw = self.epochs_raw.copy()
 
