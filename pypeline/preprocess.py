@@ -526,7 +526,7 @@ class Preprocess:
             extra_eye_events: Indices of extra eye-tracking events to drop
         """
 
-        if self._get_tolerance(eeg_events, eye_events) == 0:
+        if len(eeg_events) == len(eye_events) and self._get_tolerance(eeg_events, eye_events) == 0:
             return [], []
         elif len(eeg_events) == len(eye_events):
             raise RuntimeError("Event lists are the same length but do not match. Manual intervention is required.")
